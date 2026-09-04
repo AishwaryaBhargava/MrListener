@@ -301,12 +301,16 @@ def resolve_model(client: Any) -> str:
 def _retry_after_seconds(exc: Exception) -> float:
     """Best effort parse of the API hint "Please try again in 47m9.1s"."""
     text = str(exc)
-    match = re.search(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", text)
+    # Forms seen: "47m9.168s", "1h29m42s", "12.5s", "60ms". The "ms" case
+    # must not be read as 60 minutes.
+    if re.search(r"try again in [\d.]+ms\b", text):
+        return 2.0
+    match = re.search(r"try again in (?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s)?", text)
     if not match or not any(match.groups()):
         return config.MODEL_COOLDOWN_SECONDS
     hours, minutes, seconds = match.groups()
     total = float(hours or 0) * 3600 + float(minutes or 0) * 60 + float(seconds or 0)
-    return max(60.0, min(total + 5.0, 24 * 3600))
+    return max(2.0, min(total + 5.0, 24 * 3600))
 
 
 def _is_too_large(exc: Exception) -> bool:
