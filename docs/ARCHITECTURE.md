@@ -3,7 +3,7 @@
 MrListener is two processes in development (FastAPI on 8000, Vite on 5173) and
 one in production (FastAPI serving the built frontend). Everything is local
 except two outbound calls to Groq: Whisper for speech-to-text and a chat model
-for notes and live suggestions.
+for the notes.
 
 ```
 Browser (React)                         Backend (FastAPI)                     External
@@ -11,7 +11,6 @@ Browser (React)                         Backend (FastAPI)                     Ex
 MediaRecorder ──webm/opus 1 s blobs──►  /ws/record/{id} ──► raw.webm
                                         every 20 s: ffmpeg slice ──────────►  Groq Whisper
    Live transcript ◄──{"type":"transcript"}──┘
-   Ask next panel  ◄──{"type":"suggestions"}── suggestions.py ─────────────►  Groq chat
 Stop ──POST /stop──►  ffmpeg → audio.wav (16 kHz mono) → run_pipeline()
                                           1. transcribe full file ──────────►  Groq Whisper
                                           2. notes ───────────────────────────►  Groq chat
@@ -34,8 +33,7 @@ backend/
     audio.py         ffmpeg/ffprobe helpers (webm → wav, duration, window slicing)
     groq_client.py   Groq SDK wrapper with retry/backoff and missing-key errors
     transcripts.py   Transcript JSON shape, merging live windows, previews
-    live.py          Per-recording asyncio task: window transcription, WS push, suggestion triggers
-    suggestions.py   "Ask next" generation with rolling context summary, pins, history
+    live.py          Per-recording asyncio task: window transcription and WS push
     pipeline.py      run_pipeline(): transcribe → notes → diarize → notes; stage/error bookkeeping
     diarization.py   pyannote wrapper: diarize(), assign_speakers(), speaker_summary()
     speakers.py      Read-time speaker name resolution and colour indices
@@ -53,7 +51,7 @@ backend/
 frontend/
   src/
     pages/           RecordPage, MeetingsPage, MeetingDetailPage, SettingsPage
-    components/      Sidebar, Transcript, SuggestionsPanel, NotesPanel, SpeakerChips,
+    components/      Sidebar, Transcript, NotesPanel, SpeakerChips,
                      PipelineProgress, AudioPlayerBar, StatusPill, Toast, Icons
     hooks/           useRecorder (mic + MediaRecorder + WS), useAudioMeter, useHealth
     lib/             api.ts (fetch wrappers), format.ts, speakers.ts
@@ -84,13 +82,14 @@ One SQLite database at `backend/data/mrlistener.db`.
 | `transcript_json` | `{"segments":[{id,start,end,text,speaker?,speaker_id?}], "language", "source": "live"\|"final"}` |
 | `diarization_json` | Raw turns `[{start,end,speaker}]` from pyannote |
 | `speaker_names_json` | `{"S1": "Priya", "S2": "Speaker 2", ...}` plus talk-time summary. Segments are never rewritten on rename; names resolve at read time |
-| `notes_json` | Summary, key takeaways, decisions, action items (with `done`, `owner`, `owner_speaker_id`), open questions, follow-up questions, `with_speakers`, `model` |
-| `suggestions_json` | Live suggestion batches (last 20) and pinned items, frozen at stop |
+| `notes_json` | The notes object: summary, `topics` (chapters with `start`/`end`), key takeaways, decisions, action items (with `done`, `owner`, `owner_speaker_id`), `open_questions` (objects with `asked_by_speaker_id`, `time`, `answered`), `follow_up_questions`, `by_speaker`, `with_speakers`, `model` |
+| `suggestions_json` | Dead column from the removed live-suggestions feature. Never read or written; kept so an existing database opens without a migration |
 
 **settings**: key/value rows for `diarization_enabled`, `max_speakers`,
-`language_hint`, `live_window_seconds`, `suggestions_enabled`,
-`suggestions_interval_seconds`. API keys are not stored here; they live in the
-root `.env`.
+`language_hint` and `live_window_seconds`. API keys are not stored here; they
+live in the root `.env`. The data folder itself defaults to `backend/data` and
+can be moved with the `MRLISTENER_DATA_DIR` environment variable, which is how
+a smoke run keeps away from the real library.
 
 Audio lives in `backend/data/audio/<meeting_id>/`: `raw.webm` (what the browser
 sent), `audio.wav` (16 kHz mono PCM used by everything downstream), and a
@@ -109,10 +108,7 @@ transient `live_window.wav`.
    the returned segment times, and pushes `{"type":"transcript"}` to the socket.
    Later blobs from MediaRecorder are not independently decodable, which is why
    the whole file is re-read from the start each time.
-4. After each window, `suggestions.py` may refresh the "Ask next" batch if the
-   interval has elapsed and enough new words arrived. It runs as its own task
-   and never blocks transcription.
-5. `POST /stop` converts `raw.webm` to `audio.wav`, records the duration, sets
+4. `POST /stop` converts `raw.webm` to `audio.wav`, records the duration, sets
    `status = processing`, and schedules `run_pipeline()`.
 
 ## The pipeline
@@ -121,14 +117,23 @@ transient `live_window.wav`.
 
 1. **Transcribe** the full WAV once more. Live windows can clip words at the
    boundaries; the full pass is cleaner and is what diarization aligns to.
-2. **Notes**. Groq chat model in JSON mode. Transcripts longer than roughly
-   24k tokens are summarised chunk by chunk and then merged.
+2. **Notes**. Groq chat model in JSON mode: summary, chaptered `topics`,
+   takeaways, decisions, action items, the questions raised in the room and the
+   follow-ups for the reader. A transcript over `NOTES_SINGLE_PASS_CHARS` is
+   map-reduced - each chunk answers in a deliberately compact shape (fewer
+   items, shorter fields, no per-chapter prose) so the richer schema still fits
+   inside `NOTES_MAX_OUTPUT_TOKENS`, and one merge pass combines and dedupes
+   them. Topic ranges are sorted and de-overlapped in `notes._topics` rather
+   than trusted.
 3. **Diarize** with pyannote `speaker-diarization-3.1` on CPU in a worker
    thread behind a process-wide lock, so only one diarization runs at a time
    and the event loop stays free. Whisper segments get the speaker with the
    largest time overlap; speakers are numbered by first appearance.
-4. **Notes again** with speaker labels, so action-item owners can be
-   attributed. Only this pass sets `with_speakers: true`.
+4. **Notes again** with speaker labels. This is the pass that attributes
+   action-item owners and question askers and fills `by_speaker`; only it sets
+   `with_speakers: true`. If the model returns no `by_speaker` (most likely on
+   a long, map-reduced transcript) one is assembled from the attributions
+   already in hand rather than invented.
 
 Ordering notes before diarization is deliberate: diarization runs at roughly
 real time on a laptop CPU, and users should not wait an hour for a summary.
@@ -154,4 +159,7 @@ to the next rather than failing.
 - Pages poll the meeting every 2 seconds while `status == processing`; there is
   no server-sent event stream.
 - The Record page keeps the WebSocket open for the whole recording and handles
-  `transcript`, `suggestions`, `status`, `error`, `stopped` frames.
+  `transcript`, `status`, `error` and `stopped` frames.
+- The detail page's two columns each scroll inside themselves with hidden
+  scrollbars, so neither the transcript nor the notes drags the page past the
+  fixed player bar.

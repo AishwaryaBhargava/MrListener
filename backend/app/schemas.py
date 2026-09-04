@@ -92,51 +92,12 @@ class ActionItemUpdate(BaseModel):
     done: bool
 
 
-class SuggestionOut(BaseModel):
-    """One thing the user could say next."""
-
-    text: str
-    #: "question" | "clarify" | "follow_up" | "risk"
-    kind: str = "question"
-    #: One sentence tying it to what was actually said.
-    why: str = ""
-    #: Seconds into the recording of the line that prompted it.
-    based_on_time: Optional[float] = None
-
-
-class SuggestionBatchOut(BaseModel):
-    items: List[SuggestionOut] = Field(default_factory=list)
-    generated_at: Optional[str] = None
-    #: End of the transcript the batch was written from.
-    transcript_end: Optional[float] = None
-
-
-class SuggestionsOut(BaseModel):
-    """The whole history for one meeting, newest batch last."""
-
-    batches: List[SuggestionBatchOut] = Field(default_factory=list)
-    pinned: List[SuggestionOut] = Field(default_factory=list)
-    #: True while the recording is live and the state is still in memory.
-    live: bool = False
-    enabled: bool = True
-    interval_seconds: int = 45
-
-
-class PinsUpdate(BaseModel):
-    """The complete pinned set, replacing whatever was stored."""
-
-    pinned: List[SuggestionOut] = Field(default_factory=list)
-
-
 class SettingsOut(BaseModel):
     diarization_enabled: bool = True
     max_speakers: Optional[int] = None
     #: "" means auto-detect.
     language_hint: str = ""
     live_window_seconds: int = 20
-    suggestions_enabled: bool = True
-    #: Seconds between two automatic refreshes; 30-180.
-    suggestions_interval_seconds: int = 45
 
 
 class SettingsUpdate(BaseModel):
@@ -144,8 +105,6 @@ class SettingsUpdate(BaseModel):
     max_speakers: Optional[int] = None
     language_hint: Optional[str] = None
     live_window_seconds: Optional[int] = None
-    suggestions_enabled: Optional[bool] = None
-    suggestions_interval_seconds: Optional[int] = None
 
 
 class KeyStatus(BaseModel):

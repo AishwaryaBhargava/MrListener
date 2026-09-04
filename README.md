@@ -23,11 +23,11 @@ models never leave it.
   pause/resume and a running timer. Space toggles pause.
 - **Transcribes live** — every 20 seconds (configurable) the text so far appears
   on the Record page, so you can see it is working.
-- **Tells you what to ask next.** While it listens, an **Ask next** column beside
-  the live transcript fills with three to five concrete things worth saying out
-  loud — a question nobody asked, a commitment with no owner, a number that went
-  unqualified. Copy one to the clipboard, or pin it so it survives the next
-  refresh.
+- **Writes notes worth reading.** Not just a summary: chaptered **topics** with
+  a timestamp range you can click to jump the audio, the decisions, the action
+  items with owners, a **per-speaker breakdown** of what each person argued,
+  committed to and asked, the questions raised in the room with who asked them
+  and whether anyone answered, and the follow-ups you should chase.
 - **Writes the notes first, then the speakers.** After you press stop you have a
   summary in about half a minute. Speaker labels arrive a few minutes later and
   the notes are quietly rewritten with real attribution.
@@ -130,23 +130,21 @@ browser only ever talks to 5173.
 2. Press **Start recording**. Audio streams to the backend over a WebSocket in
    1 second chunks. **Pause** freezes the timer and the bars; **Resume**
    continues the same file. Space does the same thing when you are not typing.
-3. Every 20 seconds the live transcript updates. About every 45 seconds — and
-   only once roughly forty new words have been said — the **Ask next** column
-   refreshes with what is worth asking now. The refresh icon forces one
-   immediately; the copy icon puts a suggestion on the clipboard, and the pin
-   icon moves it to a **Pinned** group that later batches never replace. Both
-   are off if you turn **Live suggestions** off in Settings.
+3. Every 20 seconds the live transcript updates, filling the card below the
+   recorder.
 4. Press **Stop and process**. You land on the meeting page, which polls while
    the pipeline runs. The notes appear within roughly half a minute; a banner
    tells you speaker identification is still going.
 5. When the speaker chips appear, click a pencil to rename someone. Every label
    on the page updates.
-6. Tick action items as you do them. **Follow-up questions** lists what you
-   should still chase — separate from **Open questions**, which is what the
-   people in the room asked and nobody answered. **Suggestions during the
-   meeting**, below the notes, replays what the Ask next column offered. **Export Markdown**, **Copy notes** and
-   **Regenerate notes** are in the header. Space plays and pauses the audio;
-   clicking any transcript line seeks there.
+6. Read the notes column: **Summary**, **Topics** (click a range to jump the
+   audio there), **Decisions**, **Action items** — tick them as you do them —
+   **By speaker**, **Open questions** and **Follow-ups for you**. Open questions
+   are what the people in the room asked, with who asked and whether it was
+   answered; follow-ups are what *you* should still chase. Empty sections are
+   hidden. **Export Markdown**, **Copy notes** and **Regenerate notes** are in
+   the header. Space plays and pauses the audio; clicking any transcript line
+   seeks there.
 7. **Meetings** lists everything, newest first, and the search box looks inside
    transcripts and notes, not just titles.
 
@@ -160,9 +158,9 @@ walks a list of steps:
 | - | ---------------- | ------------ | ------------ |
 | 0 | `transcribing` | Transcribe the tail no live window covered | 1-3 s |
 | 1 | `transcribing` | One clean Groq Whisper pass over the whole WAV | ~5 s per 10 min |
-| 2 | `summarizing` | Notes, without speaker labels | 2-10 s |
+| 2 | `summarizing` | Notes, without speaker labels or the per-speaker breakdown | 2-10 s |
 | 3 | `identifying_speakers` | pyannote diarization, locally, on CPU | **~0.5-1x realtime** |
-| 4 | `summarizing` | Notes again, now attributed to speakers | 2-10 s |
+| 4 | `summarizing` | Notes again, attributed, with **By speaker** filled in | 2-10 s |
 
 Then `pipeline_stage` goes null and the status becomes `ready`.
 
@@ -199,38 +197,49 @@ two-speaker fixture:
 
 Scale the diarization row linearly with meeting length; the others barely move.
 
-## How live suggestions work
+## What the notes contain
 
-While a meeting is recording, `backend/app/suggestions.py` runs alongside the
-live transcription loop. After a live window produces new text the loop asks it
-whether a refresh is due; it is when **both** gates are open — at least
-`suggestions_interval_seconds` (default 45) since the last refresh started, and
-at least ~40 new words. The Groq call then runs as its own asyncio task, so a
-slow completion can never delay the next transcription window, and a second
-refresh is dropped rather than queued while one is in flight.
+The notes step sends the transcript to a Groq chat model in JSON mode and
+stores the answer in `notes_json`:
 
-**The prompt stays bounded.** Only the last 8 minutes of transcript go in
-verbatim. Everything older is represented by a rolling "context so far" note,
-which the model itself re-compresses into 3-5 lines every third refresh. An
-hour-long meeting therefore costs the same per refresh as a five minute one.
+| Field | What it holds |
+| ----- | ------------- |
+| `summary` | Three to five sentences on the whole meeting |
+| `topics` | The chapters: `{title, start, end, summary}`, in time order and never overlapping. The detail page shows each as an `mm:ss-mm:ss` button that seeks the player |
+| `key_takeaways` | Short facts worth remembering |
+| `decisions` | What was actually decided |
+| `action_items` | `{task, owner, owner_speaker_id, due, source_time, done}` |
+| `open_questions` | Questions asked **in** the room: `{question, asked_by, asked_by_speaker_id, time, answered}` |
+| `follow_up_questions` | What *you* should ask or chase afterwards |
+| `by_speaker` | Per person: `main_points`, `commitments`, `questions_raised`. Empty until speakers are known |
 
-Each batch arrives over the existing recording WebSocket as
-`{"type": "suggestions", "items": [...], "generated_at": ..., "transcript_end": ...}`.
-The last 20 batches are kept in memory and written into `suggestions_json` at
-`/stop`, which is what the detail page reads back.
+**Two passes.** The first runs before diarization and fills everything except
+`by_speaker` and the speaker attributions; the second runs once speakers exist
+and fills those in. Until it lands, the **By speaker** section shows
+"Speaker breakdown arrives once speakers are identified".
 
-| Endpoint | |
-| -------- | --- |
-| `POST /api/meetings/{id}/suggestions/refresh` | force a batch now; returns it |
-| `GET /api/meetings/{id}/suggestions` | the batch history and the pinned set |
-| `PATCH /api/meetings/{id}/suggestions/pins` | replace the pinned set |
+**Long meetings are map-reduced.** Past `NOTES_SINGLE_PASS_CHARS` the
+transcript is cut into `NOTES_CHUNK_CHARS` pieces, each answered in a
+deliberately compact shape (fewer items, shorter fields), and one merge pass
+combines and dedupes them. The compact chunk shape is what keeps the richer
+schema inside `NOTES_MAX_OUTPUT_TOKENS`, which is sized for Groq's free tier
+and deliberately not raised. Topic ranges are sorted and de-overlapped in code
+afterwards, so the chapter list is always usable even when the merge is sloppy.
 
-One refresh costs a single chat completion — around 2-3 seconds on the
-reference machine, or about 4-5 seconds end to end through the refresh
-endpoint. A failure is logged and skipped: recording, transcription and the
-notes never depend on it.
+**Renames propagate.** `owner`, `asked_by` and each `by_speaker` name are
+resolved from their stored `S`-id through `speaker_names_json` at read time, so
+renaming S1 relabels the action items she owns, the questions she asked and her
+own block — in the UI, in **Copy notes** and in the Markdown export.
+
+Notes written by an earlier build still render: `open_questions` stored as
+plain strings are read back as objects with empty attribution, and `topics` and
+`by_speaker` come back empty and their sections stay hidden.
 
 ## Where your data lives
+
+`backend/data` is the default; set `MRLISTENER_DATA_DIR` to point the database
+and the audio somewhere else, which is how a smoke run stays away from your real
+library.
 
 ```text
 backend/data/
@@ -249,8 +258,8 @@ backend/data/
 | `transcript_json` | `{"segments": [{id, start, end, text, speaker?, speaker_id?}], "language", "source"}` |
 | `diarization_json` | `{"turns": [{start, end, speaker}]}` straight from pyannote |
 | `speaker_names_json` | `{"names": {"S1": "Priya"}, "summary": [talk time per speaker]}` |
-| `notes_json` | the notes object, including per-item `done` state |
-| `suggestions_json` | `{"batches": [{items, generated_at, transcript_end}], "pinned": [...], "context_summary"}` — the live suggestions, frozen at `/stop` |
+| `notes_json` | the notes object above, including per-item `done` state |
+| `suggestions_json` | a dead column from the removed live-suggestions feature; nothing reads or writes it, and it is kept only so an existing database opens without a migration |
 | `auto_title` | the original `Recording NN` name, when the notes step renamed the meeting |
 
 Two design notes that matter if you extend this:
@@ -275,8 +284,6 @@ on the next call — no restart.
 | Live window | 20 s | 10-60 s. Shorter feels more live and costs more API calls |
 | Identify speakers | On | Turn off to skip the slow step entirely |
 | Maximum speakers | Auto | Set it when you know how many people were in the room; it makes diarization more accurate |
-| Live suggestions | On | The **Ask next** column on the Record page. Off means no suggestion API calls at all |
-| Refresh every | 45 s | 30-180 s. The shortest gap between two automatic refreshes; a refresh also waits for ~40 new words |
 
 Keys are never returned by the API — only "Set" plus the last four characters.
 
@@ -295,15 +302,19 @@ backend\.venv\Scripts\python backend\scripts\smoke_transcribe.py
 # Stage 3: the diarization engine on its own, against known boundaries
 backend\.venv\Scripts\python backend\scripts\diarize_smoke.py
 
-# Live suggestions: streams a 70 s script full of loose ends, checks the
-# suggestion frames on the socket, the refresh endpoint, follow_up_questions
-# in the notes, the stored history and the pins. Takes about three minutes.
-backend\.venv\Scripts\python backend\scripts\smoke_suggestions.py
-
-# Stages 1-5 end to end: record, transcribe, notes, speakers, rename, search,
-# export, regenerate, delete - and it starts a second recording mid-diarization
-# to prove the app stays usable. Takes about two minutes.
+# Stages 1-5 end to end: record, transcribe, notes (topics, open questions and
+# the per-speaker breakdown included), speakers, rename, search, export,
+# regenerate, delete - and it starts a second recording mid-diarization to prove
+# the app stays usable. Takes about two minutes.
 backend\.venv\Scripts\python backend\scripts\smoke_full.py
+```
+
+Point a smoke run at a scratch database rather than your own library:
+
+```powershell
+$env:MRLISTENER_DATA_DIR = "$env:TEMP\mrlistener-smoke"
+backend\.venv\Scripts\python -m uvicorn app.main:app --port 8001   # from backend\
+backend\.venv\Scripts\python backend\scripts\smoke_full.py --base-url http://localhost:8001
 ```
 
 Speech fixtures are built on first use from the Windows System.Speech voices
@@ -337,8 +348,8 @@ stays that way:
 - `backend/data/` (recordings and the SQLite database) is git-ignored.
 - Generated test audio under `backend/scripts/fixtures/` is git-ignored.
 - The only network calls are to Groq (audio for transcription, transcript text
-  for notes and suggestions) and, on first use, to Hugging Face to download the
-  speaker models. Speaker identification itself runs locally.
+  for the notes) and, on first use, to Hugging Face to download the speaker
+  models. Speaker identification itself runs locally.
 
 ## Troubleshooting
 

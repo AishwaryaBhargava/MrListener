@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { AudioPlayerBar, type PlayerHandle } from '../components/AudioPlayerBar'
 import {
   ChevronLeftIcon,
-  ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
   RefreshIcon,
@@ -13,16 +12,10 @@ import { NotesPanel } from '../components/NotesPanel'
 import { SpeakerChips } from '../components/SpeakerChips'
 import { MeetingStatusPill } from '../components/StatusPill'
 import { PipelineProgress } from '../components/PipelineProgress'
-import { SuggestionsPanel } from '../components/SuggestionsPanel'
 import { TranscriptList, WorkingIndicator } from '../components/Transcript'
 import { useToast } from '../components/Toast'
-import { api, type Meeting, type Suggestion, type SuggestionHistory, type Transcript } from '../lib/api'
-import { formatDuration, formatLongDate, formatStamp, formatTimeOfDay, stageLabel } from '../lib/format'
-
-/** Pins are addressed by their text; the model never repeats one verbatim. */
-function sameSuggestion(a: Suggestion, b: Suggestion): boolean {
-  return a.text.trim().toLowerCase() === b.text.trim().toLowerCase()
-}
+import { api, type Meeting, type Transcript } from '../lib/api'
+import { formatDuration, formatLongDate, formatTimeOfDay, stageLabel } from '../lib/format'
 
 /** How often to re-read the meeting while the backend pipeline is running. */
 const POLL_MS = 2000
@@ -37,8 +30,6 @@ export default function MeetingDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
-  const [suggestions, setSuggestions] = useState<SuggestionHistory | null>(null)
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const savedTitleRef = useRef('')
   // Mirrors `title` so `load` can compare against it without taking it as a
   // dependency - otherwise the poll interval would restart on every keystroke.
@@ -83,22 +74,6 @@ export default function MeetingDetailPage() {
       cancelled = true
     }
   }, [id, load])
-
-  // Read once: the batches were frozen into the row at /stop and never change
-  // afterwards, so this does not belong in the poll.
-  useEffect(() => {
-    if (!id) return
-    let cancelled = false
-    void api
-      .getSuggestions(id)
-      .then((history) => {
-        if (!cancelled) setSuggestions(history)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [id])
 
   // The recorder page navigates here the moment /stop returns, so the pipeline
   // is usually still running. Poll until it lands on a terminal status.
@@ -203,22 +178,6 @@ export default function MeetingDetailPage() {
     }
   }
 
-  const handleTogglePin = async (item: Suggestion) => {
-    if (!id || !suggestions) return
-    const previous = suggestions
-    const pinned = previous.pinned.some((entry) => sameSuggestion(entry, item))
-    const next = pinned
-      ? previous.pinned.filter((entry) => !sameSuggestion(entry, item))
-      : [...previous.pinned, item]
-    setSuggestions({ ...previous, pinned: next })
-    try {
-      setSuggestions(await api.setSuggestionPins(id, next))
-    } catch {
-      setSuggestions(previous)
-      toast.error('Could not save that pin')
-    }
-  }
-
   const handleCopy = async () => {
     if (!id) return
     try {
@@ -269,12 +228,6 @@ export default function MeetingDetailPage() {
   }
 
   const segments = transcript?.segments ?? []
-  const batches = suggestions?.batches ?? []
-  const latestBatch = batches.length > 0 ? batches[batches.length - 1] : null
-  const latestItems = (latestBatch?.items ?? []).filter(
-    (item) => !(suggestions?.pinned ?? []).some((pin) => sameSuggestion(pin, item)),
-  )
-  const suggestionCount = latestItems.length + (suggestions?.pinned.length ?? 0)
   const stage = meeting.pipeline_stage
   const identifying = processing && (stage === 'identifying_speakers' || stage === 'diarizing')
   const summarizing = processing && stage === 'summarizing'
@@ -419,62 +372,19 @@ export default function MeetingDetailPage() {
             {meeting.notes?.with_speakers && <span className="card-note">With speakers</span>}
           </div>
           <div className="card-body">
-            <NotesPanel
-              notes={meeting.notes}
-              speakers={meeting.speakers}
-              working={summarizing || (transcribing && !meeting.notes)}
-              onToggleItem={handleToggleItem}
-              onSeek={(seconds) => playerRef.current?.seek(seconds)}
-            />
-          </div>
-        </section>
-      </div>
-
-      {latestBatch && (
-        <section className="card suggestions-card">
-          <div className="collapse-head">
-            <button
-              type="button"
-              className="collapse-toggle"
-              onClick={() => setSuggestionsOpen((open) => !open)}
-              aria-expanded={suggestionsOpen}
-            >
-              <ChevronRightIcon
-                size={16}
-                className={suggestionsOpen ? 'collapse-chevron open' : 'collapse-chevron'}
-              />
-              <span className="card-title">Suggestions during the meeting</span>
-              <span className="card-note">
-                {suggestionCount} item{suggestionCount === 1 ? '' : 's'}
-              </span>
-            </button>
-            {latestBatch.transcript_end !== null && (
-              <button
-                type="button"
-                className="action-time"
-                onClick={() => playerRef.current?.seek(latestBatch.transcript_end as number)}
-                title="Play from here"
-              >
-                {formatStamp(latestBatch.transcript_end)}
-              </button>
-            )}
-          </div>
-          {suggestionsOpen && (
-            <div className="card-body">
-              <SuggestionsPanel
-                items={latestItems}
-                pinned={suggestions?.pinned ?? []}
-                generatedAt={latestBatch.generated_at}
-                hasBatch
-                active={false}
-                enabled
-                onTogglePin={(item) => void handleTogglePin(item)}
+            <div className="notes-scroll">
+              <NotesPanel
+                notes={meeting.notes}
+                speakers={meeting.speakers}
+                working={summarizing || (transcribing && !meeting.notes)}
+                identifying={identifying}
+                onToggleItem={handleToggleItem}
                 onSeek={(seconds) => playerRef.current?.seek(seconds)}
               />
             </div>
-          )}
+          </div>
         </section>
-      )}
+      </div>
 
       <AudioPlayerBar
         ref={playerRef}

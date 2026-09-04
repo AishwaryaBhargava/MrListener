@@ -7,9 +7,7 @@ connects and cancelled when it closes or /stop is pressed. Every
 1. decodes ``raw.webm`` from ``last_end`` to EOF into a 16 kHz mono WAV,
 2. sends that window to Groq Whisper,
 3. offsets the returned segment times by the window start,
-4. persists the running transcript and pushes the new segments to the browser,
-5. asks :mod:`.suggestions` whether it is time to work out what the user should
-   ask next - always as a separate task, never in line with the window.
+4. persists the running transcript and pushes the new segments to the browser.
 
 The window is extracted by decoding the whole webm every tick rather than by
 transcribing individual blobs: MediaRecorder's blobs after the first are not
@@ -30,7 +28,7 @@ from typing import Any
 import anyio
 from starlette.websockets import WebSocket
 
-from . import config, groq_client, settings, suggestions, transcripts
+from . import config, groq_client, settings, transcripts
 from .audio import AudioError, extract_window
 from .db import SessionLocal
 from .models import Meeting
@@ -104,7 +102,6 @@ def take(meeting_id: str) -> LiveSession | None:
 
 def discard(meeting_id: str) -> None:
     take(meeting_id)
-    suggestions.discard(meeting_id)
 
 
 def _cancel(session: LiveSession) -> None:
@@ -131,28 +128,6 @@ async def _send(session: LiveSession, payload: dict[str, Any]) -> None:
 
 async def send_status(session: LiveSession, stage: str) -> None:
     await _send(session, {"type": "status", "stage": stage})
-
-
-async def send_suggestions(session: LiveSession, batch: dict[str, Any]) -> None:
-    """Push one finished suggestion batch down the recording socket."""
-    await _send(
-        session,
-        {
-            "type": "suggestions",
-            "items": batch.get("items") or [],
-            "generated_at": batch.get("generated_at"),
-            "transcript_end": batch.get("transcript_end"),
-        },
-    )
-
-
-def push_suggestions(session: LiveSession):
-    """An ``on_batch`` callback bound to this session's socket."""
-
-    async def deliver(batch: dict[str, Any]) -> None:
-        await send_suggestions(session, batch)
-
-    return deliver
 
 
 # --------------------------------------------------------------------------
@@ -223,15 +198,6 @@ async def transcribe_window(session: LiveSession, minimum: float) -> list[dict]:
 
         _persist(session)
         await _send(session, {"type": "transcript", "segments": new_segments})
-
-        # Fire and forget: suggestions run as their own task so a slow chat
-        # completion can never delay the next transcription window. Only while
-        # a socket is attached, though - the tail pass the pipeline runs after
-        # /stop has nobody left to tell, and its state was already frozen.
-        if session.websocket is not None:
-            suggestions.maybe_refresh(
-                session.meeting_id, session.segments, push_suggestions(session)
-            )
         return new_segments
 
 

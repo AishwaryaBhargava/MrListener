@@ -34,22 +34,36 @@ includes `id`, `title`, `created_at`, `duration_seconds`, `status`,
 | GET | `/api/meetings/{id}/audio` | `Range` header supported | The 16 kHz mono WAV, seekable |
 | GET | `/api/meetings/{id}/export.md` | | Markdown: notes then the full transcript |
 
-## Live suggestions
+## The notes object
 
-| Method | Path | Body | Notes |
-| ------ | ---- | ---- | ----- |
-| GET | `/api/meetings/{id}/suggestions` | | `{batches[], pinned[], live, enabled, interval_seconds}` |
-| POST | `/api/meetings/{id}/suggestions/refresh` | | Forces a new batch for an active recording; waits for an in-flight one instead of duplicating it |
-| PATCH | `/api/meetings/{id}/suggestions/pins` | `{pinned: [{text, kind, why, based_on_time}]}` | Replaces the pinned list |
+`MeetingOut.notes` (and `notes_json`) carries:
 
-A suggestion item is `{text, kind, why, based_on_time}` where `kind` is one of
-`question`, `clarify`, `follow_up`, `risk`.
+| Field | Shape |
+| ----- | ----- |
+| `title_suggestion` | `string \| null` - replaces a `Recording NN` title, once |
+| `summary` | 3-5 sentences on the whole meeting |
+| `topics` | `[{title, start, end, summary}]` - chapters in time order, never overlapping, times in seconds |
+| `key_takeaways` | `string[]` |
+| `decisions` | `string[]` |
+| `action_items` | `[{task, owner, owner_speaker_id, due, source_time, done}]` |
+| `open_questions` | `[{question, asked_by, asked_by_speaker_id, time, answered}]` - questions asked **in** the meeting |
+| `follow_up_questions` | `string[]` - what the reader should chase afterwards |
+| `by_speaker` | `[{speaker_id, name, main_points[], commitments[], questions_raised[]}]` - empty until diarization has run |
+| `generated_at`, `with_speakers`, `model` | provenance |
+
+`owner`, `asked_by` and `by_speaker[].name` are resolved from their stored
+`S`-ids through `speaker_names_json` on every read, so `PATCH
+/api/meetings/{id}/speakers` relabels all three at once.
+
+Notes written by an older build are read back in this shape too:
+`open_questions` given as plain strings become objects with empty attribution,
+and `topics` and `by_speaker` come back empty.
 
 ## Settings
 
 | Method | Path | Body | Notes |
 | ------ | ---- | ---- | ----- |
-| GET | `/api/settings` | | `{diarization_enabled, max_speakers, language_hint, live_window_seconds, suggestions_enabled, suggestions_interval_seconds}` |
+| GET | `/api/settings` | | `{diarization_enabled, max_speakers, language_hint, live_window_seconds}` |
 | PUT | `/api/settings` | Any subset of the above | Partial update |
 | GET | `/api/settings/keys` | | Status of each key: set or not, with the last four characters |
 | PUT | `/api/settings/keys` | `{groq_api_key?, hf_token?}` | Writes the root `.env` and applies without restart. Blank or absent means leave unchanged |
@@ -66,7 +80,6 @@ Frames from the server, all JSON text:
 | ------ | ------- | ---- |
 | `status` | `{stage}` | The backend changed what it is doing |
 | `transcript` | `{segments: [{id, start, end, text}]}` | A live window finished transcribing |
-| `suggestions` | `{items[], generated_at, transcript_end}` | A new "Ask next" batch |
 | `error` | `{message}` | Transcription trouble; recording continues regardless |
 | `stopped` | `{bytes}` | Reply to a `stop` text frame |
 | `pong` | | Reply to `ping` |

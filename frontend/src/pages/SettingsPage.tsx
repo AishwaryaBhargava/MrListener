@@ -204,64 +204,6 @@ export default function SettingsPage() {
 
       <section className="card">
         <div className="card-head">
-          <h2 className="card-title">Live suggestions</h2>
-        </div>
-        <div className="card-body settings-body">
-          <SettingRow
-            label="Suggest follow-ups while recording"
-            hint="Reads the transcript as it arrives and proposes questions worth asking next, in the Ask next column on the Record page."
-          >
-            <button
-              type="button"
-              className={settings?.suggestions_enabled ? 'toggle on' : 'toggle'}
-              role="switch"
-              aria-checked={settings?.suggestions_enabled ?? false}
-              onClick={() => void save({ suggestions_enabled: !settings?.suggestions_enabled })}
-              disabled={!settings}
-              aria-label="Suggest follow-ups while recording"
-            >
-              <span className="toggle-knob" />
-            </button>
-          </SettingRow>
-
-          <SettingRow
-            label="Refresh every"
-            hint="The shortest gap between two automatic refreshes. A refresh also waits for about 40 new words, so a quiet stretch costs nothing."
-          >
-            <div className="settings-slider">
-              <input
-                type="range"
-                min={30}
-                max={180}
-                step={15}
-                value={settings?.suggestions_interval_seconds ?? 45}
-                onChange={(event) =>
-                  setSettings(
-                    settings
-                      ? {
-                          ...settings,
-                          suggestions_interval_seconds: Number(event.target.value),
-                        }
-                      : null,
-                  )
-                }
-                onMouseUp={(event) =>
-                  void save({ suggestions_interval_seconds: Number(event.currentTarget.value) })
-                }
-                onKeyUp={(event) =>
-                  void save({ suggestions_interval_seconds: Number(event.currentTarget.value) })
-                }
-                disabled={!settings || !settings.suggestions_enabled}
-                aria-label="Seconds between suggestion refreshes"
-              />
-              <span className="settings-value">{settings?.suggestions_interval_seconds ?? 45}s</span>
-            </div>
-          </SettingRow>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-head">
           <h2 className="card-title">Speakers</h2>
         </div>
         <div className="card-body settings-body">

@@ -470,6 +470,15 @@ h1.page-title {
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   padding-bottom: 96px;
+  align-items: start;
+}
+
+/* The notes column scrolls inside itself, like the transcript beside it, so
+   a long set of notes never drags the page past the fixed player bar. */
+.notes-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 900px) {
@@ -855,6 +864,101 @@ button.transcript-line:hover { background: var(--fill-subtle); }
 }
 .action-time:hover { text-decoration: underline; }
 
+/* --- topics: a seek button, the chapter title, and one line about it --- */
+
+.topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.topic-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: var(--radius-nav);
+  transition: background 120ms ease;
+}
+.topic-row:hover { background: var(--fill-subtle); }
+
+.topic-range { flex: none; min-width: 86px; text-align: left; }
+
+.topic-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.topic-title { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.45; }
+
+.topic-summary { font-size: 13px; line-height: 1.5; color: var(--text-body); }
+
+/* --- by speaker: one block per person, in that person's colour --- */
+
+.speaker-notes { display: flex; flex-direction: column; gap: 14px; }
+
+.speaker-note { display: flex; flex-direction: column; gap: 7px; }
+
+.speaker-note-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.speaker-note-group { display: flex; flex-direction: column; gap: 3px; }
+
+.speaker-note-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* --- open questions: the question, then who asked it and whether it landed --- */
+
+.question-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.question-row { display: flex; flex-direction: column; gap: 3px; }
+
+.question-text { font-size: 14px; line-height: 1.5; color: var(--text-body); }
+
+.question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--meta);
+}
+
+.question-asker { font-weight: 700; }
+
+.question-state { font-weight: 600; color: var(--meta); }
+.question-state.answered { color: var(--accent-hover); }
+
+/* --- BY SPEAKER before diarization has finished --- */
+
+.notes-pending {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--meta);
+}
+
 .notes-refreshing {
   display: flex;
   align-items: center;
@@ -1096,20 +1200,7 @@ button.transcript-line:hover { background: var(--fill-subtle); }
   .toast { animation: none; }
 }
 
-/* ============================ Live suggestions ============================ */
-
-/* Transcript left, "Ask next" right. Stacked once the two columns would each
-   be too narrow to read a full question in. */
-.record-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
-  gap: 18px;
-  align-items: start;
-}
-
-@media (max-width: 1100px) {
-  .record-columns { grid-template-columns: 1fr; }
-}
+/* ============================ Icon buttons ============================ */
 
 .card-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
@@ -1135,7 +1226,6 @@ button.transcript-line:hover { background: var(--fill-subtle); }
 }
 .icon-btn:hover:not(:disabled) { background: var(--fill-subtle); color: var(--text-body); }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.icon-btn.pinned { color: var(--accent-hover); }
 
 .icon-btn.spinning svg { animation: icon-spin 900ms linear infinite; }
 
@@ -1148,171 +1238,30 @@ button.transcript-line:hover { background: var(--fill-subtle); }
   .icon-btn.spinning svg { animation: none; opacity: 0.6; }
 }
 
-.suggestions { display: flex; flex-direction: column; gap: 18px; }
-
-.suggestion-group { display: flex; flex-direction: column; gap: 8px; }
-
-.suggestion-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.suggestion-row {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 9px 10px;
-  border-radius: var(--radius-nav);
-  transition: background 120ms ease;
-}
-.suggestion-row:hover { background: var(--fill-subtle); }
-
-/* A new batch dissolves in; the list is keyed on the batch stamp, so pinned
-   rows above it never blink. */
-.suggestion-row.fade { animation: suggestion-in 260ms ease-out; }
-
-@keyframes suggestion-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .suggestion-row.fade { animation: none; }
-}
-
-.suggestion-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.suggestion-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.suggestion-row:hover .suggestion-actions,
-.suggestion-actions:focus-within { opacity: 1; }
-.suggestion-actions .icon-btn { width: 26px; height: 26px; }
-.suggestion-actions .icon-btn.pinned { opacity: 1; }
-.suggestion-row:has(.icon-btn.pinned) .suggestion-actions { opacity: 1; }
-
-/* Muted tints from the existing palette - no new saturated colours. */
-.kind-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 9px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  background: var(--fill-subtle-strong);
-  color: var(--meta);
-}
-
-.kind-question { background: var(--speaker-1-tint); color: var(--speaker-1-text); }
-.kind-clarify { background: var(--speaker-3-tint); color: var(--speaker-3-text); }
-.kind-follow_up { background: var(--speaker-5-tint); color: var(--speaker-5-text); }
-.kind-risk { background: var(--speaker-4-tint); color: var(--speaker-4-text); }
-
-.suggestion-text {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-body);
-}
-
-.suggestion-why {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--meta);
-}
-
-.suggestion-stamp {
-  margin-left: 7px;
-  font-variant-numeric: tabular-nums;
-}
-span.suggestion-stamp { font-size: 12px; font-weight: 700; color: var(--meta); }
-
-.suggestion-waiting {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin: 0;
-  font-size: 13px;
-  color: var(--meta);
-}
-
-/* --- the detail page's collapsible batch history --- */
-
-/* The player bar is fixed to the bottom, so whichever block comes last owns
-   the clearance under it. */
-.detail-columns:has(+ .suggestions-card) { padding-bottom: 18px; }
-.suggestions-card { margin-bottom: 96px; }
-
-.collapse-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-}
-
-.collapse-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: var(--text);
-  text-align: left;
-}
-
-.collapse-chevron {
-  flex: none;
-  color: var(--faint);
-  transition: transform 140ms ease;
-}
-.collapse-chevron.open { transform: rotate(90deg); }
-
-.suggestions-card .card-body { border-top: 1px solid var(--border); }
-
-/* Record page: transcript and suggestions cards share one height and each
-   scrolls inside itself, so neither card outgrows the other. */
-.record-columns { align-items: stretch; }
-.record-columns > .card {
+/* Record page: one full-width transcript card that scrolls inside itself, so
+   a long recording never pushes the recorder controls off the screen. */
+.record-transcript {
   display: flex;
   flex-direction: column;
   height: 520px;
   min-height: 0;
+  margin-bottom: 24px;
 }
-.record-columns > .card > .card-head { flex: 0 0 auto; }
-.record-columns > .card > .card-body {
+.record-transcript > .card-head { flex: 0 0 auto; }
+.record-transcript > .card-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
 }
-.record-columns .transcript-scroll {
+.record-transcript .transcript-scroll {
   max-height: none;
   flex: 1 1 auto;
   min-height: 0;
 }
-.record-columns > .card > .card-body:has(> .transcript-scroll) { overflow: hidden; }
 @media (max-width: 1100px) {
-  .record-columns > .card { height: auto; max-height: 520px; }
+  .record-transcript { height: auto; max-height: 520px; }
 }
 
 /* ============================ Detail header layout ============================ */

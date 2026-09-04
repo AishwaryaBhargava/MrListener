@@ -1,27 +1,39 @@
 import { CheckIcon } from './Icons'
-import type { ActionItem, Notes, Speaker } from '../lib/api'
+import type { ActionItem, Notes, OpenQuestion, Speaker, SpeakerNotes, Topic } from '../lib/api'
 import { formatStamp } from '../lib/format'
-import { colorForId } from '../lib/speakers'
+import { colorForId, type SpeakerColor } from '../lib/speakers'
 
 interface Props {
   notes: Notes | null
   speakers: Speaker[]
   /** True while the backend is writing (or rewriting) them. */
   working: boolean
+  /** True while diarization is still running, so BY SPEAKER is only pending. */
+  identifying?: boolean
   onToggleItem: (index: number, done: boolean) => void
-  /** Jump the player to where an action item was said. */
+  /** Jump the player to a topic, an action item or a question. */
   onSeek: (seconds: number) => void
 }
 
 /**
  * The detail page's right column.
  *
- * Empty sections are hidden rather than shown empty: a meeting with no
- * decisions should not display a "DECISIONS" heading over nothing. The whole
- * panel is driven by `notes` alone, so the second (speaker-aware) notes pass
- * simply replaces the contents on the next poll.
+ * Sections run summary, topics, decisions, action items, per-speaker, open
+ * questions, follow-ups - narrowest to broadest, with everything the meeting
+ * decided near the top. Empty sections are hidden rather than shown empty: a
+ * meeting with no decisions should not display a "DECISIONS" heading over
+ * nothing. The whole panel is driven by `notes` alone, so the second
+ * (speaker-aware) notes pass simply replaces the contents on the next poll -
+ * which is when BY SPEAKER stops being a placeholder and becomes real blocks.
  */
-export function NotesPanel({ notes, speakers, working, onToggleItem, onSeek }: Props) {
+export function NotesPanel({
+  notes,
+  speakers,
+  working,
+  identifying,
+  onToggleItem,
+  onSeek,
+}: Props) {
   if (working && !notes) return <NotesSkeleton />
 
   if (!notes) {
@@ -37,6 +49,10 @@ export function NotesPanel({ notes, speakers, working, onToggleItem, onSeek }: P
     return match ? colorForId(match.id) : colorForId(speakerId)
   }
 
+  const topics = notes.topics ?? []
+  const bySpeaker = notes.by_speaker ?? []
+  const openQuestions = notes.open_questions ?? []
+
   return (
     <div className="notes">
       {working && <NotesWorkingBar />}
@@ -47,7 +63,16 @@ export function NotesPanel({ notes, speakers, working, onToggleItem, onSeek }: P
         </Section>
       )}
 
-      <ListSection title="Key takeaways" items={notes.key_takeaways} />
+      {topics.length > 0 && (
+        <Section title="Topics">
+          <ul className="topic-list">
+            {topics.map((topic, index) => (
+              <TopicRow key={`${index}-${topic.title}`} topic={topic} onSeek={onSeek} />
+            ))}
+          </ul>
+        </Section>
+      )}
+
       <ListSection title="Decisions" items={notes.decisions} />
 
       {notes.action_items.length > 0 && (
@@ -66,8 +91,48 @@ export function NotesPanel({ notes, speakers, working, onToggleItem, onSeek }: P
         </Section>
       )}
 
-      <ListSection title="Open questions" items={notes.open_questions} />
-      <ListSection title="Follow-up questions" items={notes.follow_up_questions ?? []} />
+      {(bySpeaker.length > 0 || identifying) && (
+        <Section title="By speaker">
+          {bySpeaker.length > 0 ? (
+            <div className="speaker-notes">
+              {bySpeaker.map((block) => (
+                <SpeakerBlock
+                  key={block.speaker_id}
+                  block={block}
+                  color={colorFor(block.speaker_id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="notes-pending" role="status">
+              <span className="working-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              Speaker breakdown arrives once speakers are identified
+            </p>
+          )}
+        </Section>
+      )}
+
+      {openQuestions.length > 0 && (
+        <Section title="Open questions">
+          <ul className="question-list">
+            {openQuestions.map((item, index) => (
+              <QuestionRow
+                key={`${index}-${item.question.slice(0, 24)}`}
+                item={item}
+                color={colorFor(item.asked_by_speaker_id)}
+                onSeek={onSeek}
+              />
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <ListSection title="Follow-ups for you" items={notes.follow_up_questions ?? []} />
+      <ListSection title="Key takeaways" items={notes.key_takeaways} />
     </div>
   )
 }
@@ -94,9 +159,29 @@ function ListSection({ title, items }: { title: string; items: string[] }) {
   )
 }
 
+/** One chapter: a range button that seeks, the title, and a one-liner. */
+function TopicRow({ topic, onSeek }: { topic: Topic; onSeek: (seconds: number) => void }) {
+  return (
+    <li className="topic-row">
+      <button
+        type="button"
+        className="action-time topic-range"
+        onClick={() => onSeek(topic.start)}
+        title="Play from here"
+      >
+        {formatStamp(topic.start)}-{formatStamp(topic.end)}
+      </button>
+      <div className="topic-body">
+        <span className="topic-title">{topic.title}</span>
+        {topic.summary && <span className="topic-summary">{topic.summary}</span>}
+      </div>
+    </li>
+  )
+}
+
 interface RowProps {
   item: ActionItem
-  color: { tint: string; text: string; dot: string }
+  color: SpeakerColor
   onToggle: () => void
   onSeek: (seconds: number) => void
 }
@@ -139,6 +224,73 @@ function ActionRow({ item, color, onToggle, onSeek }: RowProps) {
           )}
         </span>
       </div>
+    </li>
+  )
+}
+
+/** One speaker's contribution, under a chip in their own colour. */
+function SpeakerBlock({ block, color }: { block: SpeakerNotes; color: SpeakerColor }) {
+  const groups: Array<[string, string[]]> = [
+    ['Main points', block.main_points ?? []],
+    ['Commitments', block.commitments ?? []],
+    ['Questions raised', block.questions_raised ?? []],
+  ]
+  const filled = groups.filter(([, items]) => items.length > 0)
+  if (filled.length === 0) return null
+
+  return (
+    <div className="speaker-note">
+      <p className="speaker-note-name" style={{ color: color.text }}>
+        <span className="speaker-dot" style={{ background: color.dot }} />
+        {block.name ?? block.speaker_id}
+      </p>
+      {filled.map(([label, items]) => (
+        <div key={label} className="speaker-note-group">
+          <span className="speaker-note-label">{label}</span>
+          <ul className="notes-list">
+            {items.map((item, index) => (
+              <li key={`${index}-${item.slice(0, 24)}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A question asked in the room, with who asked it and whether it landed. */
+function QuestionRow({
+  item,
+  color,
+  onSeek,
+}: {
+  item: OpenQuestion
+  color: SpeakerColor
+  onSeek: (seconds: number) => void
+}) {
+  return (
+    <li className="question-row">
+      <span className="question-text">{item.question}</span>
+      <span className="question-meta">
+        {item.asked_by && (
+          <span className="question-asker" style={{ color: color.text }}>
+            asked by {item.asked_by}
+          </span>
+        )}
+        {item.time !== null && (
+          <button
+            type="button"
+            className="action-time"
+            onClick={() => onSeek(item.time as number)}
+            title="Play from here"
+          >
+            {formatStamp(item.time)}
+          </button>
+        )}
+        <span className={item.answered ? 'question-state answered' : 'question-state'}>
+          {item.answered ? 'answered' : 'unanswered'}
+        </span>
+      </span>
     </li>
   )
 }

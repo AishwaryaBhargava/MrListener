@@ -30,8 +30,6 @@ DIARIZATION_ENABLED = "diarization_enabled"
 MAX_SPEAKERS = "max_speakers"
 LANGUAGE_HINT = "language_hint"
 LIVE_WINDOW_SECONDS = "live_window_seconds"
-SUGGESTIONS_ENABLED = "suggestions_enabled"
-SUGGESTIONS_INTERVAL_SECONDS = "suggestions_interval_seconds"
 
 #: Everything the settings page can change, with the value used when the row is
 #: absent. Keys not in here are rejected by :func:`put`.
@@ -40,16 +38,12 @@ DEFAULTS: dict[str, Any] = {
     MAX_SPEAKERS: None,
     LANGUAGE_HINT: "",
     LIVE_WINDOW_SECONDS: config.LIVE_CHUNK_SECONDS,
-    SUGGESTIONS_ENABLED: True,
-    SUGGESTIONS_INTERVAL_SECONDS: config.SUGGESTIONS_MIN_INTERVAL,
 }
 
 LIVE_WINDOW_MIN = 10
 LIVE_WINDOW_MAX = 60
 MAX_SPEAKERS_MIN = 2
 MAX_SPEAKERS_MAX = 20
-SUGGESTIONS_INTERVAL_MIN = 30
-SUGGESTIONS_INTERVAL_MAX = 180
 
 
 class SettingsError(ValueError):
@@ -110,7 +104,7 @@ def put(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def _coerce(key: str, value: Any) -> Any:
-    if key in (DIARIZATION_ENABLED, SUGGESTIONS_ENABLED):
+    if key == DIARIZATION_ENABLED:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -147,13 +141,6 @@ def _coerce(key: str, value: Any) -> Any:
             raise SettingsError("live_window_seconds must be a whole number") from exc
         return max(LIVE_WINDOW_MIN, min(LIVE_WINDOW_MAX, number))
 
-    if key == SUGGESTIONS_INTERVAL_SECONDS:
-        try:
-            number = int(value)
-        except (TypeError, ValueError) as exc:
-            raise SettingsError("suggestions_interval_seconds must be a whole number") from exc
-        return max(SUGGESTIONS_INTERVAL_MIN, min(SUGGESTIONS_INTERVAL_MAX, number))
-
     return value
 
 
@@ -182,19 +169,6 @@ def live_window_seconds() -> int:
         return int(get(LIVE_WINDOW_SECONDS))
     except (TypeError, ValueError):
         return config.LIVE_CHUNK_SECONDS
-
-
-def suggestions_enabled() -> bool:
-    return bool(get(SUGGESTIONS_ENABLED))
-
-
-def suggestions_interval_seconds() -> int:
-    """Seconds between two automatic suggestion refreshes, clamped to range."""
-    try:
-        number = int(get(SUGGESTIONS_INTERVAL_SECONDS))
-    except (TypeError, ValueError):
-        return config.SUGGESTIONS_MIN_INTERVAL
-    return max(SUGGESTIONS_INTERVAL_MIN, min(SUGGESTIONS_INTERVAL_MAX, number))
 
 
 # --------------------------------------------------------------------------

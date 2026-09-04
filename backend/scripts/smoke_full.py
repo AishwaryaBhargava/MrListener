@@ -16,7 +16,9 @@ What it proves
    diarization starts** (the timings printed at the end show the gap).
 4. The transcript has segments, at least 80% of them carry a speaker, and
    exactly two speakers were found.
-5. The notes have a real summary and at least one action item.
+5. The notes carry the full schema: a real summary, chronological
+   non-overlapping ``topics``, at least one action item, ``open_questions`` as
+   objects, and a ``by_speaker`` breakdown once diarization has run.
 6. The auto title "Recording NN" was replaced by the model's suggestion.
 7. **The app stays usable during diarization**: while the first meeting is in
    the identifying_speakers stage, a second meeting is created and 5 seconds
@@ -31,6 +33,9 @@ Options
     --keep        leave the created meetings in the database
     --rebuild     regenerate the speech fixture first
     --timeout     seconds to wait for the pipeline (default 900)
+
+Point the backend under test at a scratch library with ``MRLISTENER_DATA_DIR``
+before starting it, and this script never touches the real database or audio.
 """
 
 from __future__ import annotations
@@ -207,6 +212,67 @@ def live_text(frames: list[dict]) -> str:
 
 
 # --------------------------------------------------------------------------
+# The notes schema
+# --------------------------------------------------------------------------
+
+
+def check_notes_shape(notes: dict, speakers: bool) -> None:
+    """Every field the detail page and the Markdown export read.
+
+    ``topics`` are the load-bearing new part: they must exist, be in time
+    order, and not overlap, because the UI turns each range into a seek button.
+    ``by_speaker`` is only expected once diarization has run.
+    """
+    topics = notes.get("topics") or []
+    check(len(topics) >= 1, f"the notes carry {len(topics)} topic(s)")
+    for topic in topics:
+        if not str(topic.get("title") or "").strip():
+            raise SmokeFailure(f"a topic has no title: {topic}")
+        if float(topic["end"]) < float(topic["start"]):
+            raise SmokeFailure(f"a topic ends before it starts: {topic}")
+    starts = [float(topic["start"]) for topic in topics]
+    check(starts == sorted(starts), f"the topics are chronological ({[round(x) for x in starts]})")
+    overlaps = [
+        (topics[i]["title"], topics[i + 1]["title"])
+        for i in range(len(topics) - 1)
+        if float(topics[i]["end"]) > float(topics[i + 1]["start"])
+    ]
+    check(not overlaps, f"no two topic ranges overlap ({overlaps})")
+
+    questions = notes.get("open_questions") or []
+    check(
+        all(isinstance(item, dict) and "question" in item for item in questions),
+        f"open_questions are objects, not strings ({len(questions)} of them)",
+    )
+    check(
+        all(isinstance(item.get("answered"), bool) for item in questions),
+        "every open question says whether it was answered",
+    )
+
+    check(
+        isinstance(notes.get("follow_up_questions"), list),
+        "follow_up_questions survived as its own field",
+    )
+
+    blocks = notes.get("by_speaker") or []
+    if speakers:
+        check(len(blocks) >= 1, f"by_speaker has {len(blocks)} block(s) after diarization")
+        for block in blocks:
+            if not str(block.get("speaker_id") or "").startswith("S"):
+                raise SmokeFailure(f"a by_speaker block has no S-id: {block}")
+            if not any(
+                block.get(key) for key in ("main_points", "commitments", "questions_raised")
+            ):
+                raise SmokeFailure(f"a by_speaker block is empty: {block}")
+        check(
+            all(block.get("name") for block in blocks),
+            "every by_speaker block carries a resolved name",
+        )
+    else:
+        check(not blocks, "by_speaker is empty before diarization has run")
+
+
+# --------------------------------------------------------------------------
 # Polling
 # --------------------------------------------------------------------------
 
@@ -328,7 +394,11 @@ async def main() -> int:
         check(body(raw)["status"] == "processing", "meeting is 'processing' after /stop")
 
         # -- the app stays usable while diarization runs --------------------
-        concurrency = {"tested": False, "notes_before_diarization": False}
+        concurrency = {
+            "tested": False,
+            "notes_before_diarization": False,
+            "first_pass_checked": False,
+        }
 
         async def on_stage(stage: str | None, snapshot: dict) -> None:
             if stage in ("identifying_speakers", "diarizing"):
@@ -336,6 +406,12 @@ async def main() -> int:
                     concurrency["notes_before_diarization"] = True
                     elapsed = time.monotonic() - started_at
                     note(f"notes were ready before diarization started ({elapsed:.0f}s in)")
+                    early = snapshot.get("notes") or {}
+                    if not concurrency["first_pass_checked"]:
+                        concurrency["first_pass_checked"] = True
+                        # The pre-diarization pass writes everything except the
+                        # speaker breakdown and the attributions.
+                        check_notes_shape(early, speakers=False)
                 if concurrency["tested"]:
                     return
                 concurrency["tested"] = True
@@ -414,6 +490,7 @@ async def main() -> int:
         check(len(str(notes["summary"]).strip()) > 40, "the summary is non-empty")
         check(len(notes["action_items"]) >= 1, f"{len(notes['action_items'])} action item(s)")
         check(notes["with_speakers"] is True, "the notes were written with speaker labels")
+        check_notes_shape(notes, speakers=True)
 
         check(
             ready["title"] != auto_name,
@@ -444,6 +521,30 @@ async def main() -> int:
         check(
             "## Action items" in markdown and "- [ ]" in markdown,
             "export.md renders the action items as checkboxes",
+        )
+        check("## Topics" in markdown, "export.md has a Topics section")
+        check("## By speaker" in markdown, "export.md has a By speaker section")
+        headings = [
+            heading
+            for heading in (
+                "## Summary",
+                "## Topics",
+                "## Decisions",
+                "## Action items",
+                "## By speaker",
+                "## Open questions",
+                "## Follow-ups for you",
+            )
+            if heading in markdown
+        ]
+        positions = [markdown.index(heading) for heading in headings]
+        check(
+            positions == sorted(positions),
+            f"export.md renders the notes sections in order ({' -> '.join(headings)})",
+        )
+        check(
+            markdown.index("## Topics") < markdown.index("## Transcript"),
+            "the notes come before the transcript in export.md",
         )
 
         # -- action item state ------------------------------------------------
@@ -483,6 +584,14 @@ async def main() -> int:
         check(
             any(s["id"] == "S1" and s["name"] == "Priya" for s in again["speakers"]),
             "regenerating notes did not lose the renamed speaker",
+        )
+        check_notes_shape(again["notes"], speakers=True)
+        named = [
+            block for block in again["notes"]["by_speaker"] if block.get("speaker_id") == "S1"
+        ]
+        check(
+            not named or named[0].get("name") == "Priya",
+            "the by_speaker block resolves S1 to the renamed speaker",
         )
 
         # -- report -------------------------------------------------------------

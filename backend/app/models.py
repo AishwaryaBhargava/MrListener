@@ -79,8 +79,9 @@ class Meeting(Base):
     diarization_json: Mapped[str | None] = mapped_column(Text, nullable=True)     # Stage 3
     notes_json: Mapped[str | None] = mapped_column(Text, nullable=True)           # Stage 4
     speaker_names_json: Mapped[str | None] = mapped_column(Text, nullable=True)   # Stage 3/5
-    #: Every live suggestion batch this meeting produced, plus the pinned
-    #: items, frozen at /stop. See ``suggestions.dumps``.
+    #: Written by the removed live-suggestions feature. Nothing reads or
+    #: writes it any more; the column stays so an existing database opens
+    #: unchanged and no migration has to drop anything.
     suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

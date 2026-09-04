@@ -15,9 +15,7 @@ from .. import (
     notes as notes_mod,
     pipeline,
     services,
-    settings as settings_mod,
     speakers,
-    suggestions as suggestions_mod,
     transcripts,
 )
 from ..audio import AudioError, range_file_response
@@ -28,10 +26,7 @@ from ..schemas import (
     MeetingCreate,
     MeetingOut,
     MeetingUpdate,
-    PinsUpdate,
     SpeakerOut,
-    SuggestionBatchOut,
-    SuggestionsOut,
     TranscriptOut,
 )
 
@@ -167,9 +162,6 @@ async def stop_meeting(meeting_id: str, db: Session = Depends(get_db)) -> Meetin
     # fires while ffmpeg rewrites the audio. Its ``last_end`` lets the pipeline
     # transcribe the tail that no window covered.
     session = live.take(meeting_id) if was_recording else None
-    # Freeze the batches produced while recording into suggestions_json before
-    # the in-memory state goes away with the session.
-    suggestions_mod.persist(meeting_id)
 
     try:
         meeting = await services.finalize_meeting(db, meeting)
@@ -284,85 +276,6 @@ def set_action_item(
     db.commit()
     db.refresh(meeting)
     return _to_out(meeting, detail=True)
-
-
-# --------------------------------------------------------------------------
-# Live follow-up suggestions
-# --------------------------------------------------------------------------
-
-
-def _live_segments(meeting: Meeting) -> list[dict]:
-    """The transcript a suggestion refresh should read.
-
-    While recording, the live session holds segments the database may be a
-    window behind on, so it wins; otherwise the stored transcript is all there
-    is.
-    """
-    session = live.get(meeting.id)
-    if session is not None and session.segments:
-        return list(session.segments)
-    payload = transcripts.loads(meeting.transcript_json)
-    return list(payload.get("segments") or []) if payload else []
-
-
-def _suggestions_out(meeting: Meeting) -> SuggestionsOut:
-    payload = suggestions_mod.stored(meeting)
-    return SuggestionsOut(
-        batches=[SuggestionBatchOut(**item) for item in payload["batches"]],
-        pinned=payload["pinned"],
-        live=suggestions_mod.peek(meeting.id) is not None,
-        enabled=settings_mod.suggestions_enabled(),
-        interval_seconds=settings_mod.suggestions_interval_seconds(),
-    )
-
-
-@router.get("/{meeting_id}/suggestions", response_model=SuggestionsOut)
-def get_suggestions(meeting_id: str, db: Session = Depends(get_db)) -> SuggestionsOut:
-    """Every batch this meeting produced, oldest first, plus the pinned items."""
-    return _suggestions_out(_get_or_404(db, meeting_id))
-
-
-@router.post("/{meeting_id}/suggestions/refresh", response_model=SuggestionBatchOut)
-async def refresh_suggestions(meeting_id: str, db: Session = Depends(get_db)) -> SuggestionBatchOut:
-    """Work out what to ask next, right now, and return the batch.
-
-    Async so the refresh task attaches to the running event loop. A refresh
-    already in flight is awaited rather than duplicated.
-    """
-    meeting = _get_or_404(db, meeting_id)
-    if not settings_mod.suggestions_enabled():
-        raise HTTPException(status_code=409, detail="Live suggestions are off in Settings")
-
-    segment_list = _live_segments(meeting)
-    if not segment_list:
-        raise HTTPException(
-            status_code=409, detail="There is nothing transcribed to suggest from yet"
-        )
-
-    session = live.get(meeting_id)
-    on_batch = live.push_suggestions(session) if session is not None else None
-    batch = await suggestions_mod.refresh_now(meeting_id, segment_list, on_batch)
-    if batch is None:
-        raise HTTPException(
-            status_code=502, detail="The model did not return any suggestions this time"
-        )
-    if meeting.status != STATUS_RECORDING:
-        # Not a live recording, so nothing will persist this later.
-        suggestions_mod.persist(meeting_id)
-    return SuggestionBatchOut(**batch)
-
-
-@router.patch("/{meeting_id}/suggestions/pins", response_model=SuggestionsOut)
-def set_suggestion_pins(
-    meeting_id: str,
-    payload: PinsUpdate,
-    db: Session = Depends(get_db),
-) -> SuggestionsOut:
-    """Replace the pinned set. Pinned items survive every later refresh."""
-    meeting = _get_or_404(db, meeting_id)
-    suggestions_mod.save_pins(meeting_id, [item.model_dump() for item in payload.pinned])
-    db.refresh(meeting)
-    return _suggestions_out(meeting)
 
 
 @router.get("/{meeting_id}/transcript", response_model=TranscriptOut)

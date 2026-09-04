@@ -26,16 +26,52 @@ export interface ActionItem {
   done: boolean
 }
 
+/** One chapter of the meeting. Ranges are chronological and never overlap. */
+export interface Topic {
+  title: string
+  /** Seconds into the recording where the chapter starts. */
+  start: number
+  end: number
+  /** One or two sentences on what was said in it. */
+  summary: string
+}
+
+/** A question somebody asked out loud during the meeting. */
+export interface OpenQuestion {
+  question: string
+  /** Resolved through the current speaker names on every read. */
+  asked_by: string | null
+  asked_by_speaker_id: string | null
+  /** Seconds into the recording where it was asked. */
+  time: number | null
+  /** True when somebody answered it later in the transcript. */
+  answered: boolean
+}
+
+/** What one speaker contributed. Empty until diarization has run. */
+export interface SpeakerNotes {
+  speaker_id: string
+  /** Resolved through the current speaker names on every read. */
+  name: string | null
+  main_points: string[]
+  commitments: string[]
+  questions_raised: string[]
+}
+
 export interface Notes {
   title_suggestion: string | null
   summary: string
+  /** Chapters covering the meeting, in time order. */
+  topics: Topic[]
   key_takeaways: string[]
   decisions: string[]
   action_items: ActionItem[]
-  /** Questions the participants raised and nobody answered. */
-  open_questions: string[]
+  /** Questions the participants raised in the room. */
+  open_questions: OpenQuestion[]
   /** Questions the user should still ask or chase after the meeting. */
   follow_up_questions: string[]
+  /** One block per speaker; only filled once speakers are known. */
+  by_speaker: SpeakerNotes[]
   generated_at: string
   /** True when the notes were written with speaker labels available. */
   with_speakers: boolean
@@ -72,36 +108,6 @@ export interface Meeting {
   notes: Notes | null
 }
 
-/** What kind of nudge a live suggestion is. */
-export type SuggestionKind = 'question' | 'clarify' | 'follow_up' | 'risk'
-
-export interface Suggestion {
-  /** Phrased so the user can say it out loud as-is. */
-  text: string
-  kind: SuggestionKind
-  /** One sentence tying it to what was said. */
-  why: string
-  /** Seconds into the recording of the line that prompted it. */
-  based_on_time: number | null
-}
-
-export interface SuggestionBatch {
-  items: Suggestion[]
-  generated_at: string | null
-  /** End of the transcript the batch was written from. */
-  transcript_end: number | null
-}
-
-export interface SuggestionHistory {
-  /** Oldest first; the last entry is the current batch. */
-  batches: SuggestionBatch[]
-  pinned: Suggestion[]
-  /** True while the recording is live and the state is still in memory. */
-  live: boolean
-  enabled: boolean
-  interval_seconds: number
-}
-
 export interface TranscriptSegment {
   id: number
   start: number
@@ -122,12 +128,6 @@ export interface Transcript {
 /** Text frames the recording socket pushes back while a meeting is live. */
 export type RecordSocketMessage =
   | { type: 'transcript'; segments: TranscriptSegment[] }
-  | {
-      type: 'suggestions'
-      items: Suggestion[]
-      generated_at: string | null
-      transcript_end: number | null
-    }
   | { type: 'status'; stage: string }
   | { type: 'error'; message: string }
   | { type: 'stopped'; bytes: number }
@@ -148,9 +148,6 @@ export interface Settings {
   /** '' means auto-detect. */
   language_hint: string
   live_window_seconds: number
-  suggestions_enabled: boolean
-  /** Seconds between two automatic refreshes; 30-180. */
-  suggestions_interval_seconds: number
 }
 
 export interface KeyStatus {
@@ -242,19 +239,6 @@ export const api = {
     }),
 
   getTranscript: (id: string) => request<Transcript>(`/api/meetings/${id}/transcript`),
-
-  getSuggestions: (id: string) => request<SuggestionHistory>(`/api/meetings/${id}/suggestions`),
-
-  /** Force a batch now. Only useful while the meeting is still recording. */
-  refreshSuggestions: (id: string) =>
-    request<SuggestionBatch>(`/api/meetings/${id}/suggestions/refresh`, { method: 'POST' }),
-
-  /** Replaces the whole pinned set; pinned items survive later refreshes. */
-  setSuggestionPins: (id: string, pinned: Suggestion[]) =>
-    request<SuggestionHistory>(`/api/meetings/${id}/suggestions/pins`, {
-      method: 'PATCH',
-      body: JSON.stringify({ pinned }),
-    }),
 
   getSettings: () => request<Settings>('/api/settings'),
 

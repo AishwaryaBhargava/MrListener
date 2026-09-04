@@ -2,9 +2,14 @@
 
 One function, :func:`markdown`, that renders everything the detail page shows
 into a single portable file: the notes, the speaker roster, and the full
-transcript with speaker labels and timestamps. Speaker names and action-item
-owners are resolved through ``speaker_names_json`` here too, so an exported
-file always carries the names the user actually typed.
+transcript with speaker labels and timestamps. The notes sections come in the
+same order as the detail page - summary, topics, decisions, action items, the
+per-speaker breakdown, open questions and the follow-ups - and empty ones are
+left out entirely.
+
+Speaker names, action-item owners, who asked an open question and the heading
+on each ``by_speaker`` block are all resolved through ``speaker_names_json``
+here too, so an exported file always carries the names the user actually typed.
 """
 
 from __future__ import annotations
@@ -79,12 +84,22 @@ def markdown(meeting: Meeting) -> str:
         if summary:
             lines += ["## Summary", "", summary, ""]
 
-        for heading, key in (("Key takeaways", "key_takeaways"), ("Decisions", "decisions")):
-            items = [str(item).strip() for item in note.get(key) or [] if str(item).strip()]
-            if items:
-                lines += [f"## {heading}", ""]
-                lines += [f"- {item}" for item in items]
-                lines.append("")
+        topics = note.get("topics") or []
+        if topics:
+            lines += ["## Topics", ""]
+            for topic in topics:
+                span = f"{_stamp(topic.get('start') or 0.0)}–{_stamp(topic.get('end') or 0.0)}"
+                title = str(topic.get("title") or "").strip()
+                detail = str(topic.get("summary") or "").strip()
+                tail = f" — {detail}" if detail else ""
+                lines.append(f"- **{span}** · **{title}**{tail}")
+            lines.append("")
+
+        decisions = [str(item).strip() for item in note.get("decisions") or [] if str(item).strip()]
+        if decisions:
+            lines += ["## Decisions", ""]
+            lines += [f"- {item}" for item in decisions]
+            lines.append("")
 
         actions = note.get("action_items") or []
         if actions:
@@ -103,14 +118,49 @@ def markdown(meeting: Meeting) -> str:
                 lines.append(f"- [{box}] {text}{tail}")
             lines.append("")
 
+        # Names here are already resolved through speaker_names_json, so a
+        # renamed speaker is renamed in the export too.
+        blocks = note.get("by_speaker") or []
+        if blocks:
+            lines += ["## By speaker", ""]
+            for block in blocks:
+                lines += [f"### {str(block.get('name') or block.get('speaker_id') or '').strip()}", ""]
+                for label, key in (
+                    ("Main points", "main_points"),
+                    ("Commitments", "commitments"),
+                    ("Questions raised", "questions_raised"),
+                ):
+                    entries = [str(e).strip() for e in block.get(key) or [] if str(e).strip()]
+                    if not entries:
+                        continue
+                    lines += [f"**{label}**", ""]
+                    lines += [f"- {entry}" for entry in entries]
+                    lines.append("")
+
+        questions = note.get("open_questions") or []
+        if questions:
+            lines += ["## Open questions", ""]
+            for item in questions:
+                text = str(item.get("question") or "").strip()
+                if not text:
+                    continue
+                meta = []
+                if item.get("asked_by"):
+                    meta.append(f"asked by {item['asked_by']}")
+                if item.get("time") is not None:
+                    meta.append(_stamp(float(item["time"])))
+                meta.append("answered" if item.get("answered") else "unanswered")
+                lines.append(f"- {text} — {' · '.join(meta)}")
+            lines.append("")
+
         for heading, key in (
-            ("Open questions", "open_questions"),
-            ("Follow-up questions", "follow_up_questions"),
+            ("Follow-ups for you", "follow_up_questions"),
+            ("Key takeaways", "key_takeaways"),
         ):
-            questions = [str(q).strip() for q in note.get(key) or [] if str(q).strip()]
-            if questions:
+            items = [str(item).strip() for item in note.get(key) or [] if str(item).strip()]
+            if items:
                 lines += [f"## {heading}", ""]
-                lines += [f"- {question}" for question in questions]
+                lines += [f"- {item}" for item in items]
                 lines.append("")
 
     lines += ["## Transcript", ""]

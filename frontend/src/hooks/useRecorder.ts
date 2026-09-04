@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  api,
-  type Meeting,
-  type RecordSocketMessage,
-  type Suggestion,
-  type TranscriptSegment,
-} from '../lib/api'
+import { api, type Meeting, type RecordSocketMessage, type TranscriptSegment } from '../lib/api'
 
 export type RecorderState = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping'
 
@@ -66,26 +60,6 @@ export interface UseRecorder {
   segments: TranscriptSegment[]
   /** Set when a live window fails; recording carries on regardless. */
   transcriptError: string | null
-
-  /** The most recent suggestion batch, minus anything the user pinned. */
-  suggestions: Suggestion[]
-  /** ISO stamp of that batch; changes are what drive the fade. */
-  suggestionsAt: string | null
-  /** Pinned items, oldest pin first. They survive every later batch. */
-  pinnedSuggestions: Suggestion[]
-  /** True once at least one batch has arrived for this recording. */
-  hasSuggestions: boolean
-  /** True while a forced refresh is in flight. */
-  refreshingSuggestions: boolean
-  /** Ask the backend for a batch right now. Throws on failure. */
-  refreshSuggestions: () => Promise<void>
-  /** Pin or unpin one suggestion, persisting the set to the backend. */
-  togglePin: (item: Suggestion) => Promise<void>
-}
-
-/** Pins are addressed by their text - the model never repeats one verbatim. */
-function sameSuggestion(a: Suggestion, b: Suggestion): boolean {
-  return a.text.trim().toLowerCase() === b.text.trim().toLowerCase()
 }
 
 export function useRecorder(): UseRecorder {
@@ -96,11 +70,6 @@ export function useRecorder(): UseRecorder {
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [segments, setSegments] = useState<TranscriptSegment[]>([])
   const [transcriptError, setTranscriptError] = useState<string | null>(null)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [suggestionsAt, setSuggestionsAt] = useState<string | null>(null)
-  const [pinnedSuggestions, setPinnedSuggestions] = useState<Suggestion[]>([])
-  const [hasSuggestions, setHasSuggestions] = useState(false)
-  const [refreshingSuggestions, setRefreshingSuggestions] = useState(false)
   const [deviceId, setDeviceId] = useState<string>(
     () => window.localStorage.getItem(DEVICE_STORAGE_KEY) ?? '',
   )
@@ -197,10 +166,6 @@ export function useRecorder(): UseRecorder {
         setMeeting(created)
         setSegments([])
         setTranscriptError(null)
-        setSuggestions([])
-        setSuggestionsAt(null)
-        setPinnedSuggestions([])
-        setHasSuggestions(false)
 
         const socket = new WebSocket(api.recordSocketUrl(created.id))
         socketRef.current = socket
@@ -217,10 +182,6 @@ export function useRecorder(): UseRecorder {
           if (payload.type === 'transcript') {
             setTranscriptError(null)
             setSegments((current) => [...current, ...payload.segments])
-          } else if (payload.type === 'suggestions') {
-            setSuggestions(payload.items)
-            setSuggestionsAt(payload.generated_at)
-            setHasSuggestions(true)
           } else if (payload.type === 'error') {
             setTranscriptError(payload.message)
           }
@@ -297,46 +258,6 @@ export function useRecorder(): UseRecorder {
     }
   }, [])
 
-  /**
-   * Force a batch now. The backend also pushes it down the socket, so the
-   * response is only used as a fallback for a socket that has gone quiet.
-   */
-  const refreshSuggestions = useCallback(async () => {
-    const meetingId = meetingIdRef.current
-    if (!meetingId) return
-    setRefreshingSuggestions(true)
-    try {
-      const batch = await api.refreshSuggestions(meetingId)
-      setSuggestions(batch.items)
-      setSuggestionsAt(batch.generated_at)
-      setHasSuggestions(true)
-    } finally {
-      setRefreshingSuggestions(false)
-    }
-  }, [])
-
-  /** Optimistic: the row moves, then the write is confirmed or rolled back. */
-  const togglePin = useCallback(
-    async (item: Suggestion) => {
-      const meetingId = meetingIdRef.current
-      const previous = pinnedSuggestions
-      const pinned = previous.some((entry) => sameSuggestion(entry, item))
-      const next = pinned
-        ? previous.filter((entry) => !sameSuggestion(entry, item))
-        : [...previous, item]
-
-      setPinnedSuggestions(next)
-      if (!meetingId) return
-      try {
-        setPinnedSuggestions((await api.setSuggestionPins(meetingId, next)).pinned)
-      } catch (err) {
-        setPinnedSuggestions(previous)
-        throw err
-      }
-    },
-    [pinnedSuggestions],
-  )
-
   const stop = useCallback(async (): Promise<Meeting | null> => {
     const meetingId = meetingIdRef.current
     if (!meetingId || state === 'idle' || state === 'stopping') return null
@@ -399,16 +320,5 @@ export function useRecorder(): UseRecorder {
     rename,
     segments,
     transcriptError,
-    // Pinned items are shown in their own group, so the live batch never
-    // repeats one back.
-    suggestions: suggestions.filter(
-      (item) => !pinnedSuggestions.some((pin) => sameSuggestion(pin, item)),
-    ),
-    suggestionsAt,
-    pinnedSuggestions,
-    hasSuggestions,
-    refreshingSuggestions,
-    refreshSuggestions,
-    togglePin,
   }
 }

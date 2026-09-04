@@ -190,36 +190,3 @@ export function UsersIcon({ size = 15, className }: IconProps) {
     </svg>
   )
 }
-
-/** Pin: a push-pin seen side on, for keeping a suggestion around. */
-export function PinIcon({ size = 14, className }: IconProps) {
-  return (
-    <svg {...base(size)} className={className}>
-      <path d="M9 4h6l-1 5 3.2 3.2a1 1 0 0 1-.7 1.7H7.5a1 1 0 0 1-.7-1.7L10 9z" />
-      <path d="M12 14v6" />
-    </svg>
-  )
-}
-
-/** The same pin, filled, for an item that is already pinned. */
-export function PinFilledIcon({ size = 14, className }: IconProps) {
-  return (
-    <svg {...base(size)} className={className}>
-      <path
-        d="M9 4h6l-1 5 3.2 3.2a1 1 0 0 1-.7 1.7H7.5a1 1 0 0 1-.7-1.7L10 9z"
-        fill="currentColor"
-      />
-      <path d="M12 14v6" />
-    </svg>
-  )
-}
-
-/** A spark of thought - the header glyph for the live suggestions card. */
-export function SparkIcon({ size = 16, className }: IconProps) {
-  return (
-    <svg {...base(size)} className={className}>
-      <path d="M12 3.5l1.7 4.3 4.3 1.7-4.3 1.7L12 15.5l-1.7-4.3L6 9.5l4.3-1.7z" />
-      <path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
-    </svg>
-  )
-}

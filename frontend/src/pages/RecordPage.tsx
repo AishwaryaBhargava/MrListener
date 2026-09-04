@@ -2,12 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MicIcon, PauseIcon, PlayIcon, StopIcon } from '../components/Icons'
 import { StatusPill, type PillTone } from '../components/StatusPill'
-import { SuggestionsPanel, SuggestionsRefreshButton } from '../components/SuggestionsPanel'
-import { useToast } from '../components/Toast'
 import { LiveTranscript } from '../components/Transcript'
 import { useAudioMeter } from '../hooks/useAudioMeter'
 import { useRecorder } from '../hooks/useRecorder'
-import { api, type Suggestion } from '../lib/api'
 import { formatTimer } from '../lib/format'
 
 const BAR_COUNT = 14
@@ -15,25 +12,9 @@ const BAR_COUNT = 14
 export default function RecordPage() {
   const navigate = useNavigate()
   const recorder = useRecorder()
-  const toast = useToast()
   // Empty until the backend hands out a name; the user may then edit it.
   const [title, setTitle] = useState('')
   const savedTitleRef = useRef('')
-  // Read once on mount: the panel needs to say so when suggestions are off.
-  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    void api
-      .getSettings()
-      .then((values) => {
-        if (!cancelled) setSuggestionsEnabled(values.suggestions_enabled)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   const isLive = recorder.state === 'recording'
   const isPaused = recorder.state === 'paused'
@@ -92,16 +73,6 @@ export default function RecordPage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isLive, isPaused, recorder])
-
-  const handleRefreshSuggestions = () => {
-    void recorder.refreshSuggestions().catch((err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Could not refresh the suggestions')
-    })
-  }
-
-  const handleTogglePin = (item: Suggestion) => {
-    void recorder.togglePin(item).catch(() => toast.error('Could not save that pin'))
-  }
 
   const commitTitle = () => {
     const next = title.trim()
@@ -220,46 +191,19 @@ export default function RecordPage() {
         </div>
       </section>
 
-      <div className="record-columns">
-        <section className="card">
-          <div className="card-head">
-            <h2 className="card-title">Live transcript</h2>
-            {isPaused && <span className="card-note">Paused</span>}
-          </div>
-          <div className="card-body">
-            <LiveTranscript
-              segments={recorder.segments}
-              waiting={isActive && recorder.transcriptError === null}
-              error={recorder.transcriptError}
-            />
-          </div>
-        </section>
-
-        <section className="card">
-          <div className="card-head">
-            <div className="card-head-text">
-              <h2 className="card-title">Ask next</h2>
-              <p className="card-subtitle">Suggested from the conversation so far</p>
-            </div>
-            <SuggestionsRefreshButton
-              onClick={handleRefreshSuggestions}
-              busy={recorder.refreshingSuggestions}
-              disabled={!isLive || !suggestionsEnabled}
-            />
-          </div>
-          <div className="card-body">
-            <SuggestionsPanel
-              items={recorder.suggestions}
-              pinned={recorder.pinnedSuggestions}
-              generatedAt={recorder.suggestionsAt}
-              hasBatch={recorder.hasSuggestions}
-              active={isActive}
-              enabled={suggestionsEnabled}
-              onTogglePin={handleTogglePin}
-            />
-          </div>
-        </section>
-      </div>
+      <section className="card record-transcript">
+        <div className="card-head">
+          <h2 className="card-title">Live transcript</h2>
+          {isPaused && <span className="card-note">Paused</span>}
+        </div>
+        <div className="card-body">
+          <LiveTranscript
+            segments={recorder.segments}
+            waiting={isActive && recorder.transcriptError === null}
+            error={recorder.transcriptError}
+          />
+        </div>
+      </section>
     </div>
   )
 }

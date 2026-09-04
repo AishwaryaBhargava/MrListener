@@ -8,8 +8,6 @@ Server -> client: JSON text frames.
 ===================  ==================================================
 ``{"type": "status", "stage": "..."}``   what the backend is doing
 ``{"type": "transcript", "segments": [...]}``   a finished live window
-``{"type": "suggestions", "items": [...],
-   "generated_at": "...", "transcript_end": 96.4}``   what to ask next
 ``{"type": "error", "message": "..."}``  transcription trouble; recording
                                          carries on regardless
 ===================  ==================================================

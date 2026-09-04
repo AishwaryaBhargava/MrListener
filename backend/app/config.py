@@ -24,7 +24,17 @@ ROOT_DIR = BACKEND_DIR.parent
 ENV_PATH = ROOT_DIR / ".env"
 load_dotenv(ENV_PATH, override=False)
 
-DATA_DIR = BACKEND_DIR / "data"
+#: Where the SQLite database and the recorded audio live. Overridable with
+#: MRLISTENER_DATA_DIR so a test or a second instance can be pointed at a
+#: scratch folder without ever touching the real library. A relative value is
+#: resolved against the project root, not the current working directory, so it
+#: means the same thing whether uvicorn starts in backend/ or at the root.
+_DATA_DIR_ENV = (os.getenv("MRLISTENER_DATA_DIR") or "").strip()
+DATA_DIR = (
+    (Path(_DATA_DIR_ENV) if Path(_DATA_DIR_ENV).is_absolute() else ROOT_DIR / _DATA_DIR_ENV)
+    if _DATA_DIR_ENV
+    else BACKEND_DIR / "data"
+)
 AUDIO_DIR = DATA_DIR / "audio"
 DB_PATH = DATA_DIR / "mrlistener.db"
 DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
@@ -107,42 +117,9 @@ MODEL_SHORT_WAIT_SECONDS = 120
 #: How many per-minute waits one request may sit through before giving up.
 MODEL_MAX_SHORT_WAITS = 6
 
-# --- Live follow-up suggestions --------------------------------------------
-#: Suggestions reuse the notes model and its fallback list, but run hotter:
-#: they are a brainstorm, not a record, and 0.2 makes them repeat themselves.
-SUGGESTIONS_TEMPERATURE = 0.3
-#: Live suggestions run many times per meeting, so they get their own, cheaper
-#: model list. Groq rate limits are per model, which keeps an hour of live
-#: refreshes from exhausting the daily budget the notes need afterwards.
-SUGGESTIONS_MODEL_CANDIDATES = (
-    "openai/gpt-oss-20b",
-    "llama-3.1-8b-instant",
-    "qwen/qwen3.6-27b",
-    "qwen/qwen3.8-27b",
-    "openai/gpt-oss-120b",
-)
 #: How long a model that answered 429 is skipped before being tried again,
 #: when the error message does not say.
 MODEL_COOLDOWN_SECONDS = 15 * 60
-#: Floor for the gap between two automatic refreshes. The settings page can
-#: raise it; nothing can lower it below SUGGESTIONS_INTERVAL_MIN.
-SUGGESTIONS_MIN_INTERVAL = 45
-#: ...and a refresh also needs this much new speech, so a quiet stretch does
-#: not spend an API call re-reading the same transcript.
-SUGGESTIONS_MIN_NEW_WORDS = 40
-#: The tail sent verbatim. Everything older is represented by the rolling
-#: context summary instead, which is what keeps the prompt bounded on a long
-#: meeting.
-SUGGESTIONS_VERBATIM_SECONDS = 5 * 60
-#: Re-compress the older transcript into the rolling summary every N refreshes.
-SUGGESTIONS_SUMMARY_EVERY = 3
-#: Ring-buffer depth held in memory per active meeting.
-SUGGESTIONS_HISTORY = 20
-#: How many items a batch may contain, and the range the prompt asks for.
-SUGGESTIONS_MIN_ITEMS = 3
-SUGGESTIONS_MAX_ITEMS = 5
-#: Cap on the rolling summary, so it can never grow into the prompt budget.
-SUGGESTIONS_SUMMARY_CHARS = 1200
 
 # --- Stage 5: shipping ------------------------------------------------------
 APP_VERSION = "0.5.0"

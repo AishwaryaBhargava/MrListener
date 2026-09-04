@@ -21,11 +21,6 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SPEECH_WAV = FIXTURE_DIR / "stage2_speech.wav"
 SPEECH_WEBM = FIXTURE_DIR / "stage2_speech.webm"
 
-#: The live-suggestions fixture: longer, and written so a listener would have
-#: obvious things to ask about.
-SUGGESTIONS_WAV = FIXTURE_DIR / "suggestions_speech.wav"
-SUGGESTIONS_WEBM = FIXTURE_DIR / "suggestions_speech.webm"
-
 #: Deliberately meeting-shaped, and long enough that at least one 20 s live
 #: window closes while it is still streaming.
 SCRIPT = (
@@ -35,38 +30,9 @@ SCRIPT = (
     "separately, bundling it puts the demo at risk."
 )
 
-#: Deliberately full of loose ends: a contract that expires with nobody named
-#: as the owner of the renewal, a deadline with no date, an error spike nobody
-#: investigated, and a dependency nobody confirmed. A listener paying attention
-#: has several obvious questions; that is exactly what the suggestions model is
-#: asked to find. No apostrophes - the script is embedded in a single-quoted
-#: PowerShell string.
-SUGGESTIONS_SCRIPT = (
-    "Right, let us go through the vendor situation first. The Acme support "
-    "contract expires at the end of next month and we have not started the "
-    "renewal paperwork yet. Legal will need at least three weeks with it. "
-    "Separately, the migration is about sixty percent done. We saw a spike in "
-    "error rates on Tuesday, roughly four hundred failures in an hour, and I "
-    "have not had time to look into what caused it. The board review is coming "
-    "up soon and they will want the cost numbers by then. Marketing asked "
-    "whether we can bring the launch forward, and I said probably, but that "
-    "depends on whether the second data centre is ready. Nobody has confirmed "
-    "that yet. One more thing. Priya mentioned that two of the integration "
-    "tests are flaky and she has been rerunning them by hand. That is fine for "
-    "now. Let us also remember the security review. It came back with four "
-    "findings and I think two of them are still open. Okay, that is everything "
-    "from me for today."
-)
-
 #: The default voice reads the script in ~18 s; -3 stretches it past 20 s.
 SPEECH_RATE = -3
-#: The suggestions script is three times longer, so it is read at the voice's
-#: normal pace to fit inside SUGGESTIONS_SECONDS without being clipped.
-SUGGESTIONS_RATE = 0
 TARGET_SECONDS = 25.0
-#: Long enough for a live window to close, a first suggestion batch to arrive,
-#: and a forced refresh on top of it.
-SUGGESTIONS_SECONDS = 70.0
 #: CBR opus, so a byte offset in the file maps roughly onto a time offset and
 #: the smoke test can stream it at a realistic pace.
 OPUS_BITRATE = "24k"
@@ -143,26 +109,15 @@ def ensure_speech_webm(rebuild: bool = False) -> Path:
     return SPEECH_WEBM
 
 
-def ensure_suggestions_webm(rebuild: bool = False) -> Path:
-    """The ~70 s fixture the live-suggestions smoke test streams."""
-    if rebuild or not SUGGESTIONS_WAV.exists() or SUGGESTIONS_WAV.stat().st_size == 0:
-        make_speech_wav(SUGGESTIONS_WAV, SUGGESTIONS_SCRIPT, SUGGESTIONS_RATE)
-    if rebuild or not SUGGESTIONS_WEBM.exists() or SUGGESTIONS_WEBM.stat().st_size == 0:
-        make_speech_webm(SUGGESTIONS_WAV, SUGGESTIONS_WEBM, SUGGESTIONS_SECONDS)
-    return SUGGESTIONS_WEBM
-
-
 def main() -> int:
     try:
         wav = make_speech_wav()
         webm = make_speech_webm()
-        suggestions_webm = ensure_suggestions_webm(rebuild=True)
     except FixtureError as exc:
         print(f"FAILED: {exc}")
         return 1
     print(f"wrote {wav} ({wav.stat().st_size} bytes)")
     print(f"wrote {webm} ({webm.stat().st_size} bytes)")
-    print(f"wrote {suggestions_webm} ({suggestions_webm.stat().st_size} bytes)")
     return 0
 
 
