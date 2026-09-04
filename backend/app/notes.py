@@ -807,6 +807,67 @@ def _part_notes(payload: dict, valid_ids: set[str] | None) -> dict:
     }
 
 
+
+def _dedupe(items: list, key) -> list:
+    seen: set[str] = set()
+    out = []
+    for item in items:
+        text = " ".join(str(key(item) or "").lower().split())
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(item)
+    return out
+
+
+_PART_LIMITS = {
+    "key_takeaways": 10,
+    "decisions": 8,
+    "action_items": 12,
+    "open_questions": 10,
+    "follow_up_questions": 6,
+}
+
+
+def _fill_from_parts(result: dict, parts: list[dict]) -> dict:
+    """Backstop for the merge pass.
+
+    A capped model (free-tier output limits) tends to spend its answer on the
+    summary and topics and hand back empty lists for everything else. The
+    part notes already hold those lists, so any list the merge left empty is
+    rebuilt here as the de-duplicated union of the parts, in meeting order.
+    """
+    for key, limit in _PART_LIMITS.items():
+        if result.get(key):
+            continue
+        pooled = [item for part in parts for item in (part.get(key) or [])]
+        if key in ("action_items", "open_questions"):
+            field = "task" if key == "action_items" else "question"
+            merged = _dedupe(pooled, lambda it, f=field: it.get(f) if isinstance(it, dict) else it)
+        else:
+            merged = _dedupe(pooled, lambda it: it)
+        if merged:
+            result[key] = merged[:limit]
+            log.info("merge left %s empty; rebuilt %d item(s) from the part notes", key, len(result[key]))
+
+    if not result.get("by_speaker"):
+        blocks: dict[str, dict] = {}
+        for part in parts:
+            for block in part.get("by_speaker") or []:
+                sid = block.get("speaker_id")
+                if not sid:
+                    continue
+                target = blocks.setdefault(
+                    sid, {"speaker_id": sid, "name": block.get("name") or sid,
+                          "main_points": [], "commitments": [], "questions_raised": []}
+                )
+                for field in ("main_points", "commitments", "questions_raised"):
+                    target[field] = _dedupe(target[field] + list(block.get(field) or []), lambda it: it)[:5]
+        if blocks:
+            result["by_speaker"] = [blocks[k] for k in sorted(blocks, key=_order)]
+    return result
+
+
 # --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
@@ -874,6 +935,10 @@ def generate(
             _merge_prompt(parts, roster, title, with_speakers),
         )
         result = normalize(merged, valid_ids, names)
+        result = _fill_from_parts(result, parts)
+        # Action items and questions rebuilt from parts carry S-ids only;
+        # normalize again so owner / asked_by names are resolved.
+        result = normalize(result, valid_ids, names)
         passes = len(chunks) + 1
 
     if not result["summary"]:
