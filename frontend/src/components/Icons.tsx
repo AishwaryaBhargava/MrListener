@@ -180,6 +180,28 @@ export function CheckIcon({ size = 14, className }: IconProps) {
   )
 }
 
+export function UploadIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M12 16V5" />
+      <path d="M8 9l4-4 4 4" />
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  )
+}
+
+export function FileAudioIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="M9 16v-3.2l4-.9V15" />
+      <circle cx="8" cy="16.4" r="1.3" />
+      <circle cx="12" cy="15.4" r="1.3" />
+    </svg>
+  )
+}
+
 export function UsersIcon({ size = 15, className }: IconProps) {
   return (
     <svg {...base(size)} className={className}>

@@ -67,9 +67,24 @@ export function dateTileParts(isoUtc: string): { month: string; day: string } {
   }
 }
 
+/** A byte count as the upload card shows it: '4.2 MB', '1.1 GB'. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
 /** What the backend is doing right now, for the processing state. */
 export function stageLabel(stage: string | null): string {
   switch (stage) {
+    case 'converting':
+      return 'Converting'
     case 'transcribing':
       return 'Transcribing'
     case 'identifying_speakers':
@@ -82,14 +97,18 @@ export function stageLabel(stage: string | null): string {
   }
 }
 
-/** "14:32 - 12 min - 2 speakers - 3 action items" for a library card. */
+/** "14:32 - 12 min - 2 speakers - 3 action items" for a library card.
+ *  An uploaded meeting leads with the file it came from instead of the clock:
+ *  the time of day it was uploaded says much less than the file's name does. */
 export function meetingMeta(meeting: {
   created_at: string
   duration_seconds: number | null
   speaker_count: number
   action_item_count: number
+  source_filename?: string | null
 }): string {
-  const parts = [formatTimeOfDay(meeting.created_at), formatDuration(meeting.duration_seconds)]
+  const lead = meeting.source_filename || formatTimeOfDay(meeting.created_at)
+  const parts = [lead, formatDuration(meeting.duration_seconds)]
   if (meeting.speaker_count > 0) {
     parts.push(`${meeting.speaker_count} speaker${meeting.speaker_count === 1 ? '' : 's'}`)
   }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronRightIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/Icons'
+import { ChevronRightIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from '../components/Icons'
 import { MeetingStatusPill } from '../components/StatusPill'
 import { useToast } from '../components/Toast'
+import { UPLOAD_ACCEPT, useUpload } from '../hooks/useUpload'
 import { api, type Meeting } from '../lib/api'
 import { dateTileParts, meetingMeta } from '../lib/format'
 
@@ -12,6 +13,8 @@ const DEBOUNCE_MS = 300
 export default function MeetingsPage() {
   const navigate = useNavigate()
   const toast = useToast()
+  const uploader = useUpload()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -59,6 +62,14 @@ export default function MeetingsPage() {
     }
   }
 
+  // Same flow as the record page's drop zone: the file picker opens, the
+  // upload runs with a progress bar in the header, then the detail page takes
+  // over the polling.
+  const handleUpload = async (file: File | null | undefined) => {
+    if (!file) return
+    await uploader.upload(file)
+  }
+
   const newestId = meetings[0]?.id
 
   return (
@@ -68,11 +79,48 @@ export default function MeetingsPage() {
           <p className="eyebrow">Library</p>
           <h1 className="page-title">Meetings</h1>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => navigate('/')}>
-          <PlusIcon size={16} />
-          New recording
-        </button>
+        <div className="head-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            className="visually-hidden"
+            onChange={(event) => {
+              void handleUpload(event.target.files?.[0])
+              // Reset, so picking the same file twice still fires onChange.
+              event.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploader.uploading}
+          >
+            <UploadIcon size={16} />
+            {uploader.uploading ? 'Uploading...' : 'Upload audio'}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/')}>
+            <PlusIcon size={16} />
+            New recording
+          </button>
+        </div>
       </div>
+
+      {uploader.uploading && (
+        <div className="head-progress" role="status" aria-live="polite">
+          <div className="upload-track">
+            <div className="upload-fill" style={{ width: `${Math.round(uploader.progress * 100)}%` }} />
+          </div>
+          <span className="upload-percent">{Math.round(uploader.progress * 100)}%</span>
+        </div>
+      )}
+
+      {uploader.error && (
+        <div className="error-banner" role="alert">
+          {uploader.error}
+        </div>
+      )}
 
       <div className="search-row">
         <span className="search-icon">
@@ -118,6 +166,7 @@ export default function MeetingsPage() {
                 <div className="meeting-main">
                   <div className="meeting-title-row">
                     <span className="meeting-title">{meeting.title}</span>
+                    {meeting.source === 'upload' && <span className="source-tag">Uploaded</span>}
                     <MeetingStatusPill
                       status={meeting.status}
                       stage={meeting.pipeline_stage}

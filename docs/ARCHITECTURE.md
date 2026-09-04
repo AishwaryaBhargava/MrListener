@@ -77,7 +77,9 @@ One SQLite database at `backend/data/mrlistener.db`.
 | `duration_seconds` | From ffprobe after stop |
 | `status` | `recording` → `processing` → `ready` (`failed` is reserved) |
 | `audio_path` | Path to `audio.wav` |
-| `pipeline_stage` | `transcribing`, `summarizing`, `identifying_speakers`, or null |
+| `pipeline_stage` | `converting` (uploads only), `transcribing`, `summarizing`, `identifying_speakers`, or null |
+| `source` | `live` for a microphone recording, `upload` for a file. Added by the additive migration with `DEFAULT 'live'`, so every pre-existing row reads back as a live recording |
+| `source_filename` | The name the uploaded file arrived under; null for a live recording |
 | `pipeline_error` | Last user-visible pipeline failure; the meeting still lands on `ready` so audio stays playable |
 | `transcript_json` | `{"segments":[{id,start,end,text,speaker?,speaker_id?}], "language", "source": "live"\|"final"}` |
 | `diarization_json` | Raw turns `[{start,end,speaker}]` from pyannote |
@@ -92,8 +94,11 @@ can be moved with the `MRLISTENER_DATA_DIR` environment variable, which is how
 a smoke run keeps away from the real library.
 
 Audio lives in `backend/data/audio/<meeting_id>/`: `raw.webm` (what the browser
-sent), `audio.wav` (16 kHz mono PCM used by everything downstream), and a
-transient `live_window.wav`.
+sent), `audio.wav` (16 kHz mono PCM used by everything downstream), a transient
+`live_window.wav`, and for an uploaded meeting `upload.<ext>` - the file the
+user handed over, kept as it arrived. Only `audio.wav` is ever listed, played
+or processed; the original is there because it is the user's and is removed
+with the folder on delete.
 
 ## The recording path
 
@@ -110,6 +115,30 @@ transient `live_window.wav`.
    the whole file is re-read from the start each time.
 4. `POST /stop` converts `raw.webm` to `audio.wav`, records the duration, sets
    `status = processing`, and schedules `run_pipeline()`.
+
+## The upload path
+
+`POST /api/meetings/upload` is the alternative to recording. The extension is
+checked before anything is written (415 otherwise), the meeting row is created
+straight into `processing` with `source = "upload"` and stage `converting`, and
+the request body is streamed a megabyte at a time into
+`backend/data/audio/<id>/upload.<ext>` - the 2 GB cap is enforced as it goes, so
+an oversized file is abandoned partway rather than written out and measured
+afterwards. A failed or rejected upload deletes the row it created, leaving
+nothing behind. The response is sent the moment the file is on disk, so the
+browser can navigate to the detail page and poll while the work happens.
+
+That work is `run_pipeline()` itself, with one extra step in front:
+`_step_convert` runs `audio.convert_to_wav` in a worker thread (ffmpeg on a long
+video is minutes of CPU, and the event loop still has recordings to serve),
+records the duration, and hands over to the ordinary transcription step. The
+conversion is strict rather than lenient - an uploaded file is a complete
+container, unlike the concatenated MediaRecorder clusters in `raw.webm` - and
+`-map 0:a:0` takes the first audio stream, which is what makes video containers
+work. The step is idempotent, so `POST /reprocess` on an upload skips it once a
+wav exists and retries it when one does not. It is also the only step that can
+fail the meeting outright (`status = failed`): every other failure still leaves
+playable audio, and a failed conversion leaves nothing.
 
 ## The pipeline
 

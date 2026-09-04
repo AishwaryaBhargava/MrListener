@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from pathlib import Path
 
 import anyio
 from sqlalchemy.orm import Session
@@ -11,6 +12,9 @@ from sqlalchemy.orm import Session
 from . import config, live, pipeline
 from .audio import AudioError, convert_to_wav, probe_duration
 from .models import (
+    SOURCE_LIVE,
+    SOURCE_UPLOAD,
+    STAGE_CONVERTING,
     STAGE_TRANSCRIBING,
     STATUS_FAILED,
     STATUS_PROCESSING,
@@ -38,19 +42,63 @@ def next_default_title(db: Session) -> str:
     return f"Recording {highest + 1:02d}"
 
 
-def create_meeting(db: Session, title: str | None) -> Meeting:
-    # created_at is stamped here, i.e. the instant the user pressed start.
+def create_meeting(
+    db: Session,
+    title: str | None,
+    status: str = STATUS_RECORDING,
+    source: str = SOURCE_LIVE,
+    source_filename: str | None = None,
+    pipeline_stage: str | None = None,
+) -> Meeting:
+    # created_at is stamped here, i.e. the instant the user pressed start or
+    # handed over a file. An untitled meeting gets the same sequential
+    # "Recording NN" name either way, which is what lets the notes model
+    # replace it with its own suggestion later.
     meeting = Meeting(
         id=new_uuid(),
         title=(title or "").strip() or next_default_title(db),
         created_at=utc_now_iso(),
-        status=STATUS_RECORDING,
+        status=status,
+        source=source,
+        source_filename=source_filename,
+        pipeline_stage=pipeline_stage,
     )
     config.meeting_dir(meeting.id).mkdir(parents=True, exist_ok=True)
     db.add(meeting)
     db.commit()
     db.refresh(meeting)
     return meeting
+
+
+def create_upload_meeting(db: Session, title: str | None, filename: str) -> Meeting:
+    """A meeting for a file the user uploaded, already in ``processing``.
+
+    It never passes through ``recording``: there is nothing to stream and no
+    /stop to press. The first pipeline step converts the container the user
+    sent, which is why the row starts on the ``converting`` stage.
+    """
+    return create_meeting(
+        db,
+        title,
+        status=STATUS_PROCESSING,
+        source=SOURCE_UPLOAD,
+        source_filename=filename[:500],
+        pipeline_stage=STAGE_CONVERTING,
+    )
+
+
+def convert_upload(meeting_id: str, source: Path) -> float | None:
+    """Blocking. ``upload.<ext>`` -> ``audio.wav``; returns the duration.
+
+    Called from a worker thread by the pipeline's converting step, because a
+    long file takes minutes and the event loop has recordings to serve. The
+    original is deliberately left on disk: ``audio.wav`` is the source of
+    truth for playback and every processing step, but the file the user handed
+    over is theirs and is only removed when the meeting is deleted.
+    """
+    wav = config.wav_path(meeting_id)
+    convert_to_wav(source, wav, lenient=False)
+    return probe_duration(wav)
 
 
 def delete_meeting(db: Session, meeting: Meeting) -> None:

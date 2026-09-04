@@ -9,6 +9,8 @@ Steps, in order:
 ===  ==========================  ==========================================
  #   pipeline_stage              What it does
 ===  ==========================  ==========================================
+ -   ``converting``              ffmpeg the uploaded container to audio.wav
+                                 (uploads only; /stop already did this)
  0   ``transcribing``            Flush the live tail (only right after /stop)
  1   ``transcribing``            One full-file Groq pass over ``audio.wav``
  2   ``summarizing``             Notes, without speaker labels (~10 s)
@@ -48,9 +50,11 @@ from pathlib import Path
 from . import audio, config, groq_client, live, notes, settings, speakers, transcripts
 from .db import SessionLocal
 from .models import (
+    STAGE_CONVERTING,
     STAGE_IDENTIFYING_SPEAKERS,
     STAGE_SUMMARIZING,
     STAGE_TRANSCRIBING,
+    STATUS_FAILED,
     STATUS_PROCESSING,
     STATUS_READY,
     Meeting,
@@ -82,6 +86,10 @@ class Context:
     #: Set when the first notes pass failed; diarization still runs and the
     #: second pass retries, so a busy model never blocks speaker identification.
     notes_error: str | None = None
+    #: Where the run lands. Almost always "ready" - a step that fails still
+    #: leaves playable audio and partial output. The converting step is the
+    #: exception: an upload ffmpeg cannot decode has nothing to keep.
+    final_status: str = STATUS_READY
 
 
 class PipelineError(RuntimeError):
@@ -149,6 +157,52 @@ def _segments(row: dict | None) -> list[dict]:
 # --------------------------------------------------------------------------
 # Steps
 # --------------------------------------------------------------------------
+
+
+async def _step_convert(context: Context) -> None:
+    """Uploads only: decode the container the user sent into ``audio.wav``.
+
+    ffmpeg on a two-hour mp4 is minutes of CPU, so it runs in a worker thread
+    and the meeting sits on the ``converting`` stage meanwhile - which is what
+    the detail page draws as the first step of the progress strip. A live
+    recording never reaches here: /stop has already written the wav.
+
+    Idempotent, so a Reprocess on an upload skips straight past it.
+    """
+    from . import services
+
+    wav = config.wav_path(context.meeting_id)
+    if wav.exists() and wav.stat().st_size > 0:
+        return
+
+    source = config.stored_upload(context.meeting_id)
+    if source is None:
+        context.final_status = STATUS_FAILED
+        raise PipelineError("The uploaded file is no longer on disk")
+
+    _set_stage(context.meeting_id, STAGE_CONVERTING)
+    try:
+        duration = await anyio.to_thread.run_sync(
+            services.convert_upload, context.meeting_id, source
+        )
+    except audio.AudioError as exc:
+        # Nothing survives a failed conversion: there is no wav to play and no
+        # transcript to keep, so this is the one step that fails the meeting.
+        context.final_status = STATUS_FAILED
+        raise PipelineError(f"That file could not be converted: {exc}") from exc
+
+    _update(
+        context.meeting_id,
+        audio_path=str(wav),
+        duration_seconds=duration,
+        pipeline_stage=STAGE_TRANSCRIBING,
+    )
+    log.info(
+        "meeting %s: converted %s to audio.wav (%.1fs)",
+        context.meeting_id,
+        source.name,
+        duration or 0.0,
+    )
 
 
 async def _step_live_tail(context: Context) -> None:
@@ -376,6 +430,12 @@ STEPS: tuple[tuple[str | None, object], ...] = (
     (STAGE_SUMMARIZING, _step_notes_with_speakers),
 )
 
+#: POST /api/meetings/upload: the same run as after /stop, with the conversion
+#: of the uploaded container in front of it. Everything downstream is identical.
+UPLOAD_STEPS: tuple[tuple[str | None, object], ...] = (
+    (STAGE_CONVERTING, _step_convert),
+) + STEPS
+
 #: POST /notes/regenerate re-runs only this.
 NOTES_STEPS: tuple[tuple[str | None, object], ...] = ((STAGE_SUMMARIZING, _step_notes),)
 
@@ -404,7 +464,9 @@ async def run_pipeline(
 
     A step raising ``PipelineError`` stops the run, stores the message in
     ``pipeline_error`` and still lands on ``ready`` - the audio is playable, the
-    earlier steps' output is kept, and the user can retry with Reprocess.
+    earlier steps' output is kept, and the user can retry with Reprocess. The
+    one exception is a failed conversion of an upload, which leaves nothing at
+    all and so sets ``failed``.
     """
     context = Context(meeting_id=meeting_id, session=session, notes_only=notes_only)
     error: str | None = None
@@ -426,7 +488,12 @@ async def run_pipeline(
 
     if error is None and context.notes_error:
         error = context.notes_error
-    _update(meeting_id, status=STATUS_READY, pipeline_stage=None, pipeline_error=error)
+    _update(
+        meeting_id,
+        status=context.final_status,
+        pipeline_stage=None,
+        pipeline_error=error,
+    )
     log.info("pipeline for meeting %s finished%s", meeting_id, " with an error" if error else "")
 
 

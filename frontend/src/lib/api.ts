@@ -1,7 +1,17 @@
 export type MeetingStatus = 'recording' | 'processing' | 'ready' | 'failed'
 
-/** Which pipeline step is running. Only meaningful while status is 'processing'. */
-export type PipelineStage = 'transcribing' | 'summarizing' | 'identifying_speakers' | 'diarizing'
+/** Which pipeline step is running. Only meaningful while status is 'processing'.
+ *  'converting' is the ffmpeg pass an uploaded file goes through first; a live
+ *  recording is already converted by /stop and never shows it. */
+export type PipelineStage =
+  | 'converting'
+  | 'transcribing'
+  | 'summarizing'
+  | 'identifying_speakers'
+  | 'diarizing'
+
+/** How the audio got here: captured from the microphone, or uploaded. */
+export type MeetingSource = 'live' | 'upload'
 
 export interface Speaker {
   /** Stable key: 'S1', 'S2', ... - what a rename is addressed to. */
@@ -92,6 +102,10 @@ export interface Meeting {
   pipeline_error: string | null
   /** The 'Recording NN' name, when the notes step replaced it. */
   auto_title: string | null
+  /** 'live' for a microphone recording, 'upload' for a file. */
+  source: MeetingSource
+  /** The name of the uploaded file, when there was one. */
+  source_filename: string | null
   has_audio: boolean
   has_transcript: boolean
   has_notes: boolean
@@ -249,6 +263,57 @@ export const api = {
 
   putKeys: (values: { groq_api_key?: string; hf_token?: string }) =>
     request<Keys>('/api/settings/keys', { method: 'PUT', body: JSON.stringify(values) }),
+
+  /** Upload a recording instead of capturing one live.
+   *
+   * XMLHttpRequest rather than fetch: it is the only browser API that reports
+   * how much of a request body has gone out, and a two hour video needs a real
+   * progress bar. Resolves with the meeting as it was created - status
+   * 'processing', stage 'converting' - so the caller can navigate straight to
+   * the detail page and let it poll.
+   */
+  uploadMeeting: (file: File, title?: string, onProgress?: (fraction: number) => void) =>
+    new Promise<Meeting>((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file)
+      if (title && title.trim()) form.append('title', title.trim())
+
+      const request = new XMLHttpRequest()
+      request.open('POST', '/api/meetings/upload')
+      request.responseType = 'text'
+
+      request.upload.onprogress = (event) => {
+        if (!onProgress) return
+        onProgress(event.lengthComputable ? event.loaded / event.total : 0)
+      }
+
+      request.onload = () => {
+        let body: unknown = null
+        try {
+          body = JSON.parse(request.responseText)
+        } catch {
+          // Keep the status line below.
+        }
+        if (request.status >= 200 && request.status < 300) {
+          resolve(body as Meeting)
+          return
+        }
+        const detail = (body as { detail?: unknown } | null)?.detail
+        reject(
+          new ApiError(
+            request.status,
+            typeof detail === 'string' ? detail : `${request.status} ${request.statusText}`,
+          ),
+        )
+      }
+
+      request.onerror = () =>
+        reject(new ApiError(0, 'The upload could not reach the backend. Is it still running?'))
+      request.onabort = () => reject(new ApiError(0, 'The upload was cancelled'))
+      request.ontimeout = () => reject(new ApiError(0, 'The upload timed out'))
+
+      request.send(form)
+    }),
 
   audioUrl: (id: string) => `/api/meetings/${id}/audio`,
 

@@ -6,9 +6,15 @@ response schemas are served at `/docs` while the backend runs.
 
 All JSON responses for a meeting use the same shape (`MeetingOut`), which
 includes `id`, `title`, `created_at`, `duration_seconds`, `status`,
-`pipeline_stage`, `pipeline_error`, `has_audio`, `has_transcript`,
-`has_notes`, `transcript_preview`, `notes_preview`, `speaker_count`,
-`action_item_count`, `speakers[]` and `notes`.
+`pipeline_stage`, `pipeline_error`, `source`, `source_filename`, `has_audio`,
+`has_transcript`, `has_notes`, `transcript_preview`, `notes_preview`,
+`speaker_count`, `action_item_count`, `speakers[]` and `notes`.
+
+`source` is `"live"` for a microphone recording or `"upload"` for a file sent
+to `POST /api/meetings/upload`; `source_filename` carries the name the file
+arrived under and is `null` for a live recording. `pipeline_stage` is one of
+`converting`, `transcribing`, `summarizing`, `identifying_speakers` or null -
+`converting` only ever appears on an upload.
 
 ## Health
 
@@ -21,6 +27,7 @@ includes `id`, `title`, `created_at`, `duration_seconds`, `status`,
 | Method | Path | Body / query | Notes |
 | ------ | ---- | ------------ | ----- |
 | POST | `/api/meetings` | `{title?}` | Creates a meeting in `recording` status. Empty title becomes `Recording NN` |
+| POST | `/api/meetings/upload` | `multipart/form-data`: `file` (required), `title` (optional) | Processes an existing recording. Returns 201 with the meeting in `processing` status, stage `converting`, `source: "upload"` |
 | GET | `/api/meetings` | `?q=` | Newest first. With `q`, searches title, transcript and notes and adds `match_snippet` |
 | GET | `/api/meetings/{id}` | | Full detail; poll this while `status == processing` |
 | PATCH | `/api/meetings/{id}` | `{title}` | Rename |
@@ -33,6 +40,35 @@ includes `id`, `title`, `created_at`, `duration_seconds`, `status`,
 | GET | `/api/meetings/{id}/transcript` | | `{segments[], language, source}` |
 | GET | `/api/meetings/{id}/audio` | `Range` header supported | The 16 kHz mono WAV, seekable |
 | GET | `/api/meetings/{id}/export.md` | | Markdown: notes then the full transcript |
+
+### POST `/api/meetings/upload`
+
+Send `multipart/form-data` with a `file` part and, optionally, a `title` part.
+An empty or absent title gets the same sequential `Recording NN` name as a live
+recording, so the notes model's title suggestion still replaces it.
+
+Accepted extensions, audio or video - anything ffmpeg can decode:
+
+`mp3`, `m4a`, `aac`, `wav`, `flac`, `ogg`, `opus`, `webm`, `mp4`, `mov`, `mkv`, `wma`, `aiff`
+
+| Status | When |
+| ------ | ---- |
+| 201 | Stored. The body is the meeting as created: `status: "processing"`, `pipeline_stage: "converting"`, `source: "upload"`. Poll `GET /api/meetings/{id}` from there |
+| 400 | The file was empty, or the request body did not finish |
+| 413 | Larger than the 2 GB cap. Detected while streaming, so nothing is kept |
+| 415 | An extension that is not on the list above |
+
+The body is streamed to `backend/data/audio/<id>/upload.<ext>` a megabyte at a
+time and never held in memory. The response returns as soon as that file is on
+disk: ffmpeg converts it to `audio.wav` in a worker thread while the meeting
+sits on the `converting` stage, and then the ordinary pipeline runs unchanged.
+A conversion that fails is the one pipeline error that lands on `status:
+"failed"` rather than `ready` - there is no audio to keep. `POST /reprocess`
+converts again from the stored original.
+
+The original upload is kept beside `audio.wav`, which stays the source of truth
+for playback (`GET /audio`) and every processing step. `DELETE
+/api/meetings/{id}` removes both with the folder.
 
 ## The notes object
 

@@ -243,6 +243,7 @@ export default function MeetingDetailPage() {
 
   const segments = transcript?.segments ?? []
   const stage = meeting.pipeline_stage
+  const isUpload = meeting.source === 'upload'
   const identifying = processing && (stage === 'identifying_speakers' || stage === 'diarizing')
   const summarizing = processing && stage === 'summarizing'
   const transcribing = processing && stage === 'transcribing'
@@ -264,8 +265,18 @@ export default function MeetingDetailPage() {
       <div className="detail-head">
         <div className="detail-topbar">
           <p className="detail-meta">
-            {formatLongDate(meeting.created_at)} &middot; {formatTimeOfDay(meeting.created_at)} &middot;{' '}
-            {formatDuration(meeting.duration_seconds)}
+            {isUpload ? (
+              <>
+                Uploaded {formatLongDate(meeting.created_at)}
+                {meeting.source_filename ? ` \u00b7 ${meeting.source_filename}` : ''} &middot;{' '}
+                {formatDuration(meeting.duration_seconds)}
+              </>
+            ) : (
+              <>
+                {formatLongDate(meeting.created_at)} &middot; {formatTimeOfDay(meeting.created_at)}{' '}
+                &middot; {formatDuration(meeting.duration_seconds)}
+              </>
+            )}
           </p>
           <div className="detail-actions">
             <MeetingStatusPill
@@ -336,6 +347,7 @@ export default function MeetingDetailPage() {
             hasSpeakers={meeting.speakers.length > 0}
             durationSeconds={meeting.duration_seconds}
             diarizationEnabled={settings?.diarization_enabled ?? true}
+            isUpload={isUpload}
           />
         )}
       </div>

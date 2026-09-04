@@ -1361,6 +1361,148 @@ button.transcript-line:hover { background: var(--fill-subtle); }
   .pipeline-pulse { animation: none; }
 }
 
+/* ============================ Upload ============================ */
+/* The record page's drop zone and the meetings header's progress bar share
+   every colour and radius with the rest of the app: an upload should read as
+   the same product doing the same job by another route, not as a bolted-on
+   form. */
+
+/* Keeps a native file input reachable by keyboard and by assistive tech while
+   the styled button in front of it does the visible work. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.head-actions { display: flex; align-items: center; gap: 10px; }
+
+.dropzone {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--fill-subtle);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dropzone.dragging {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.dropzone.disabled { opacity: 0.55; }
+
+.dropzone-mark {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+
+.dropzone-file {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dropzone-lead { font-size: 14px; font-weight: 700; color: var(--text); }
+
+.dropzone-filename {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropzone-hint { font-size: 12.5px; color: var(--meta); }
+
+.dropzone-note { margin: 12px 0 0; font-size: 12.5px; color: var(--meta); }
+
+.upload-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.upload-progress,
+.head-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-progress { margin-top: 16px; }
+.head-progress { margin-bottom: 18px; }
+
+.upload-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-subtle-strong);
+  overflow: hidden;
+}
+
+.upload-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width 140ms linear;
+}
+
+.upload-percent {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--meta);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+
+.upload-error {
+  margin: 14px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9C3F2F;
+}
+
+/* The neutral pill after an uploaded meeting's title in the library. */
+.source-tag {
+  flex: none;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--fill-subtle);
+  color: var(--meta);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-fill { transition: none; }
+}
+
 /* ============================ Hidden scrollbars ============================ */
 /* Scrolling still works by wheel, trackpad, touch and keyboard; the bars are
    just not drawn. Applies to the page and every scrolling panel. */

@@ -29,6 +29,10 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("meetings", "pipeline_error", "TEXT"),
     ("meetings", "auto_title", "VARCHAR(500)"),
     ("meetings", "suggestions_json", "TEXT"),
+    # SQLite backfills existing rows with the DEFAULT as it adds the column,
+    # so every meeting recorded before uploads existed reads back as "live".
+    ("meetings", "source", "VARCHAR(16) DEFAULT 'live'"),
+    ("meetings", "source_filename", "VARCHAR(500)"),
 )
 
 

@@ -7,6 +7,9 @@ interface Props {
   hasSpeakers: boolean
   durationSeconds: number | null
   diarizationEnabled?: boolean
+  /** An uploaded recording is converted by ffmpeg before anything else, so it
+   *  gets one extra step at the front. A live recording never sees it. */
+  isUpload?: boolean
 }
 
 interface Step {
@@ -17,6 +20,8 @@ interface Step {
 
 function stepIndex(stage: string | null, hasSpeakers: boolean, withSpeakers: boolean): number {
   switch (stage) {
+    case 'converting':
+      return -1
     case 'transcribing':
       return 0
     case 'summarizing':
@@ -36,9 +41,17 @@ function estimate(durationSeconds: number | null): string {
 }
 
 /** A four-step strip shown in the header while the backend pipeline runs.
- *  Done steps get a check, the current one pulses, the rest stay muted. */
-export function PipelineProgress({ stage, hasSpeakers, durationSeconds, diarizationEnabled = true }: Props) {
-  const steps: Step[] = diarizationEnabled
+ *  Done steps get a check, the current one pulses, the rest stay muted.
+ *  An upload adds "Converting" in front, so the strip is five steps for a file
+ *  and four for a live recording. */
+export function PipelineProgress({
+  stage,
+  hasSpeakers,
+  durationSeconds,
+  diarizationEnabled = true,
+  isUpload = false,
+}: Props) {
+  const main: Step[] = diarizationEnabled
     ? [
         { key: 'transcribe', label: 'Transcribing' },
         { key: 'notes', label: 'Writing notes' },
@@ -54,7 +67,21 @@ export function PipelineProgress({ stage, hasSpeakers, durationSeconds, diarizat
         { key: 'notes', label: 'Writing notes' },
       ]
 
-  const current = Math.min(stepIndex(stage, hasSpeakers, diarizationEnabled), steps.length - 1)
+  const lead: Step[] = isUpload
+    ? [
+        {
+          key: 'convert',
+          label: 'Converting',
+          hint: 'Decoding the uploaded file into the 16 kHz audio the rest of the pipeline reads.',
+        },
+      ]
+    : []
+  const steps = [...lead, ...main]
+
+  // stepIndex numbers the main steps; the converting step sits at -1 so the
+  // offset lands it on 0 when it is present and is ignored when it is not.
+  const raw = stepIndex(stage, hasSpeakers, diarizationEnabled) + lead.length
+  const current = Math.min(Math.max(raw, 0), steps.length - 1)
   const hint = steps[current]?.hint
 
   return (

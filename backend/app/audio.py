@@ -40,13 +40,47 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def convert_to_wav(src: Path, dst: Path) -> None:
-    """Transcode the accumulated browser recording to 16 kHz mono pcm_s16le."""
+def has_audio_stream(path: Path) -> Optional[bool]:
+    """True when ``path`` carries at least one audio stream.
+
+    None when ffprobe is unavailable or cannot read the file - the caller
+    should then just try the conversion and let ffmpeg produce the error.
+    """
+    ffprobe = ffprobe_bin()
+    if not ffprobe or not path.exists():
+        return None
+    proc = _run([
+        ffprobe,
+        "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        str(path),
+    ])
+    if proc.returncode != 0:
+        return None
+    return bool(proc.stdout.decode("utf-8", "replace").strip())
+
+
+def convert_to_wav(src: Path, dst: Path, lenient: bool = True) -> None:
+    """Transcode any container ffmpeg can decode to 16 kHz mono pcm_s16le.
+
+    ``lenient`` is for the live path: ``raw.webm`` is a stream of concatenated
+    MediaRecorder clusters whose tail is usually a partial one, so timestamps
+    have to be regenerated and damaged packets dropped. A file the user
+    uploaded is a complete, well-formed container - decoding it strictly means
+    a genuinely broken file is reported rather than silently truncated.
+
+    Video containers are accepted: ``-map 0:a:0`` keeps only the first audio
+    stream, so an mp4 or mov of a call converts exactly like an audio file.
+    """
     ffmpeg = ffmpeg_bin()
     if not ffmpeg:
         raise AudioError("ffmpeg was not found on PATH")
     if not src.exists() or src.stat().st_size == 0:
         raise AudioError(f"no audio was captured ({src.name} is missing or empty)")
+    if not lenient and has_audio_stream(src) is False:
+        raise AudioError(f"{src.name} has no audio track that ffmpeg can read")
 
     dst.parent.mkdir(parents=True, exist_ok=True)
     # Written to a .part file and renamed, so a crash never leaves a half wav
@@ -57,9 +91,17 @@ def convert_to_wav(src: Path, dst: Path) -> None:
         "-hide_banner",
         "-loglevel", "error",
         "-y",
+    ]
+    if lenient:
         # MediaRecorder chunks are concatenated clusters; be forgiving.
-        "-fflags", "+genpts+discardcorrupt",
-        "-i", str(src),
+        cmd += ["-fflags", "+genpts+discardcorrupt"]
+    cmd += ["-i", str(src)]
+    if not lenient:
+        # An uploaded file may be a video, or an audio file with cover art.
+        # -map takes the first audio stream and nothing else; raw.webm has
+        # exactly one, so the live path is left with the flags it always had.
+        cmd += ["-map", "0:a:0"]
+    cmd += [
         "-vn",
         "-ac", str(WAV_CHANNELS),
         "-ar", str(WAV_SAMPLE_RATE),

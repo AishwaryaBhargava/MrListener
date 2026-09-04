@@ -1,25 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MicIcon, PauseIcon, PlayIcon, StopIcon } from '../components/Icons'
+import {
+  FileAudioIcon,
+  MicIcon,
+  PauseIcon,
+  PlayIcon,
+  StopIcon,
+  UploadIcon,
+} from '../components/Icons'
 import { StatusPill, type PillTone } from '../components/StatusPill'
 import { LiveTranscript } from '../components/Transcript'
 import { useAudioMeter } from '../hooks/useAudioMeter'
 import { useRecorder } from '../hooks/useRecorder'
-import { formatTimer } from '../lib/format'
+import { UPLOAD_ACCEPT, UPLOAD_EXTENSIONS, useUpload } from '../hooks/useUpload'
+import { formatBytes, formatTimer } from '../lib/format'
 
 const BAR_COUNT = 14
 
 export default function RecordPage() {
   const navigate = useNavigate()
   const recorder = useRecorder()
+  const uploader = useUpload()
   // Empty until the backend hands out a name; the user may then edit it.
   const [title, setTitle] = useState('')
   const savedTitleRef = useRef('')
+
+  // The upload card keeps its own title, so choosing a file never disturbs the
+  // name of a recording the user is about to start.
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadTitle, setUploadTitle] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isLive = recorder.state === 'recording'
   const isPaused = recorder.state === 'paused'
   const isActive = isLive || isPaused
   const isBusy = recorder.state === 'starting' || recorder.state === 'stopping'
+  // Recording and uploading at once would fight over the same page, so the
+  // drop zone is inert while the microphone is live.
+  const uploadDisabled = isActive || isBusy || uploader.uploading
 
   // Bars only animate while audio is actually flowing, so a pause is visible.
   const { setBarRef, levelRef } = useAudioMeter(recorder.analyserRef, isLive, BAR_COUNT)
@@ -73,6 +92,28 @@ export default function RecordPage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isLive, isPaused, recorder])
+
+  const chooseFile = (file: File | null | undefined) => {
+    if (!file) return
+    uploader.clearError()
+    setUploadFile(file)
+  }
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault()
+    setDragging(false)
+    if (uploadDisabled) return
+    chooseFile(event.dataTransfer.files?.[0])
+  }
+
+  const handleUpload = async () => {
+    if (!uploadFile) return
+    const meeting = await uploader.upload(uploadFile, uploadTitle)
+    if (meeting) {
+      setUploadFile(null)
+      setUploadTitle('')
+    }
+  }
 
   const commitTitle = () => {
     const next = title.trim()
@@ -188,6 +229,109 @@ export default function RecordPage() {
               <div className="level-fill" ref={levelRef} />
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="card upload-card">
+        <div className="card-head">
+          <h2 className="card-title">Upload a recording</h2>
+          <span className="card-note">Already have the audio?</span>
+        </div>
+        <div className="card-body">
+          <div
+            className={`dropzone${dragging ? ' dragging' : ''}${uploadDisabled ? ' disabled' : ''}`}
+            onDragOver={(event) => {
+              event.preventDefault()
+              if (!uploadDisabled) setDragging(true)
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+          >
+            <span className="dropzone-mark" aria-hidden="true">
+              {uploadFile ? <FileAudioIcon size={20} /> : <UploadIcon size={20} />}
+            </span>
+
+            {uploadFile ? (
+              <div className="dropzone-file">
+                <span className="dropzone-filename" title={uploadFile.name}>
+                  {uploadFile.name}
+                </span>
+                <span className="dropzone-hint">{formatBytes(uploadFile.size)}</span>
+              </div>
+            ) : (
+              <div className="dropzone-file">
+                <span className="dropzone-lead">Drag a file here</span>
+                <span className="dropzone-hint">
+                  {UPLOAD_EXTENSIONS.join(', ')} &middot; up to 2 GB
+                </span>
+              </div>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={UPLOAD_ACCEPT}
+              className="visually-hidden"
+              onChange={(event) => {
+                chooseFile(event.target.files?.[0])
+                // Reset, so picking the same file twice still fires onChange.
+                event.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadDisabled}
+            >
+              {uploadFile ? 'Choose another' : 'Choose file'}
+            </button>
+          </div>
+
+          {uploader.uploading && (
+            <div className="upload-progress" role="status" aria-live="polite">
+              <div className="upload-track">
+                <div
+                  className="upload-fill"
+                  style={{ width: `${Math.round(uploader.progress * 100)}%` }}
+                />
+              </div>
+              <span className="upload-percent">{Math.round(uploader.progress * 100)}%</span>
+            </div>
+          )}
+
+          {uploader.error && (
+            <p className="upload-error" role="alert">
+              {uploader.error}
+            </p>
+          )}
+
+          <div className="upload-foot">
+            <label className="field">
+              <span className="field-label">Title (optional)</span>
+              <input
+                className="input"
+                value={uploadTitle}
+                onChange={(event) => setUploadTitle(event.target.value)}
+                placeholder="Named automatically when left empty"
+                disabled={uploadDisabled}
+                spellCheck={false}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleUpload}
+              disabled={uploadDisabled || !uploadFile}
+            >
+              <UploadIcon size={16} />
+              {uploader.uploading ? 'Uploading...' : 'Upload and process'}
+            </button>
+          </div>
+
+          {isActive && (
+            <p className="dropzone-note">Uploading is available once this recording has stopped.</p>
+          )}
         </div>
       </section>
 

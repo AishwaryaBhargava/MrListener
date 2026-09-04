@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+import aiofiles
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
@@ -21,7 +24,7 @@ from .. import (
 )
 from ..audio import AudioError, range_file_response
 from ..db import get_db
-from ..models import STATUS_RECORDING, Meeting
+from ..models import SOURCE_UPLOAD, STATUS_RECORDING, Meeting
 from ..schemas import (
     ActionItemUpdate,
     MeetingCreate,
@@ -32,6 +35,7 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+log = logging.getLogger("mrlistener.meetings")
 
 #: Characters of context on either side of a search hit.
 SNIPPET_PAD = 70
@@ -99,6 +103,71 @@ def _get_or_404(db: Session, meeting_id: str) -> Meeting:
 def create_meeting(payload: MeetingCreate | None = None, db: Session = Depends(get_db)) -> MeetingOut:
     title = payload.title if payload else None
     return _to_out(services.create_meeting(db, title))
+
+
+def _upload_extension(filename: str) -> str:
+    """The accepted extension of ``filename``, or a 415 explaining why not."""
+    extension = Path(filename or "").suffix.lstrip(".").lower()
+    if extension in config.UPLOAD_EXTENSIONS:
+        return extension
+    formats = ", ".join(config.UPLOAD_EXTENSIONS)
+    named = f"'.{extension}' files" if extension else "files without an extension"
+    raise HTTPException(
+        status_code=415,
+        detail=f"MrListener cannot read {named}. Supported formats: {formats}.",
+    )
+
+
+@router.post("/upload", response_model=MeetingOut, status_code=201)
+async def upload_meeting(
+    file: UploadFile = File(..., description="An audio or video file ffmpeg can decode"),
+    title: Optional[str] = Form(default=None),
+    db: Session = Depends(get_db),
+) -> MeetingOut:
+    """Process an existing recording instead of capturing one live.
+
+    The body is streamed straight to ``backend/data/audio/<id>/upload.<ext>`` a
+    megabyte at a time, so a two-hour video never sits in memory, and the size
+    cap is checked as it goes rather than after the fact.
+
+    The response comes back the moment the file is on disk, with status
+    ``processing`` and stage ``converting``: ffmpeg and then the whole ordinary
+    pipeline run in the background while the browser polls the detail page.
+    """
+    extension = _upload_extension(file.filename or "")
+
+    meeting = services.create_upload_meeting(db, title, file.filename or f"upload.{extension}")
+    destination = config.upload_path(meeting.id, extension)
+    written = 0
+
+    try:
+        async with aiofiles.open(destination, "wb") as handle:
+            while chunk := await file.read(config.UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > config.UPLOAD_MAX_BYTES:
+                    gigabytes = config.UPLOAD_MAX_BYTES / (1024 ** 3)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"That file is larger than the {gigabytes:.0f} GB upload limit.",
+                    )
+                await handle.write(chunk)
+        if written == 0:
+            raise HTTPException(status_code=400, detail="That file is empty.")
+    except HTTPException:
+        # Nothing was processed, so leave neither a row nor a part-written file.
+        services.delete_meeting(db, meeting)
+        raise
+    except Exception as exc:  # noqa: BLE001 - a dropped connection, a full disk
+        services.delete_meeting(db, meeting)
+        log.exception("upload failed for meeting %s", meeting.id)
+        raise HTTPException(status_code=400, detail=f"The upload did not finish: {exc}") from exc
+    finally:
+        await file.close()
+
+    log.info("meeting %s: stored %s (%d bytes)", meeting.id, destination.name, written)
+    pipeline.schedule(meeting.id, steps=pipeline.UPLOAD_STEPS)
+    db.refresh(meeting)
+    return _to_out(meeting, detail=True)
 
 
 @router.get("", response_model=List[MeetingOut])
@@ -190,7 +259,14 @@ async def reprocess_meeting(
     a sync route body runs on the threadpool, where there is none.
     """
     meeting = _require_processable(db, meeting_id)
-    steps = pipeline.RESUME_STEPS if keep_transcript and meeting.transcript_json else None
+    if keep_transcript and meeting.transcript_json:
+        steps = pipeline.RESUME_STEPS
+    elif meeting.source == SOURCE_UPLOAD:
+        # The convert step is idempotent, so this only does real work when the
+        # wav is missing - which is exactly the case a failed upload leaves.
+        steps = pipeline.UPLOAD_STEPS
+    else:
+        steps = None
     pipeline.mark_processing(meeting_id)
     pipeline.schedule(meeting_id, steps=steps)
     db.refresh(meeting)
@@ -224,7 +300,10 @@ def _require_processable(db: Session, meeting_id: str, needs_audio: bool = True)
         raise HTTPException(status_code=409, detail="This meeting is already being processed")
     if needs_audio:
         wav = config.wav_path(meeting.id)
-        if not wav.exists() or wav.stat().st_size == 0:
+        playable = wav.exists() and wav.stat().st_size > 0
+        # An upload whose conversion failed has no wav yet but still has the
+        # file the user sent, so Reprocess can convert it again.
+        if not playable and config.stored_upload(meeting.id) is None:
             raise HTTPException(status_code=400, detail="This meeting has no audio to process")
     return meeting
 

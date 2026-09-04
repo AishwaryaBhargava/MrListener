@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MeetingCreate(BaseModel):
@@ -38,13 +38,17 @@ class MeetingOut(BaseModel):
     duration_seconds: Optional[float] = None
     status: str
     audio_path: Optional[str] = None
-    # Which pipeline step is running: "transcribing" | "summarizing" |
-    # "identifying_speakers" | null. Only meaningful while status is
-    # "processing".
+    # Which pipeline step is running: "converting" | "transcribing" |
+    # "summarizing" | "identifying_speakers" | null. Only meaningful while
+    # status is "processing".
     pipeline_stage: Optional[str] = None
     pipeline_error: Optional[str] = None
     #: The "Recording NN" name, when Stage 4 replaced it with a suggestion.
     auto_title: Optional[str] = None
+    #: How the audio arrived: "live" (microphone) or "upload" (a file).
+    source: str = "live"
+    #: The name of the uploaded file, when there was one.
+    source_filename: Optional[str] = None
 
     has_audio: bool = False
     has_transcript: bool = False
@@ -62,6 +66,12 @@ class MeetingOut(BaseModel):
     speakers: List[SpeakerOut] = Field(default_factory=list)
     #: The full notes payload, owners resolved to current speaker names.
     notes: Optional[Dict[str, Any]] = None
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _default_source(cls, value: Optional[str]) -> str:
+        """A row from a database the migration has not touched reads as live."""
+        return value or "live"
 
 
 class TranscriptSegment(BaseModel):

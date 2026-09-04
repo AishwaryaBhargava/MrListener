@@ -148,6 +148,27 @@ browser only ever talks to 5173.
 7. **Meetings** lists everything, newest first, and the search box looks inside
    transcripts and notes, not just titles.
 
+### Upload a recording
+
+You do not have to record in MrListener to use it. Below the recorder on
+**Record** there is an **Upload a recording** card: drag a file onto it or press
+**Choose file**, optionally give it a title, then **Upload and process**. A
+progress bar tracks the upload itself and you land on the meeting page as soon
+as the file is on the backend. The same thing is one click from the library —
+**Upload audio** next to **New recording**.
+
+Supported formats, audio or video, anything ffmpeg can decode:
+
+`mp3`, `m4a`, `aac`, `wav`, `flac`, `ogg`, `opus`, `webm`, `mp4`, `mov`, `mkv`, `wma`, `aiff`
+
+Only the first audio stream of a video file is used. The ceiling is 2 GB per
+file. The upload is converted to the same 16 kHz mono WAV a live recording
+produces — that step shows as **Converting** in the progress strip and is the
+only difference — and **everything after it is identical to a live recording**:
+the same transcription, the same notes, the same speaker identification,
+renaming, search, export and reprocessing. The file you uploaded is kept
+alongside the converted audio and is removed with the meeting.
+
 ## How the pipeline works
 
 `POST /api/meetings/{id}/stop` converts the recording to a 16 kHz mono WAV and
@@ -307,6 +328,11 @@ backend\.venv\Scripts\python backend\scripts\diarize_smoke.py
 # regenerate, delete - and it starts a second recording mid-diarization to prove
 # the app stays usable. Takes about two minutes.
 backend\.venv\Scripts\python backend\scripts\smoke_full.py
+
+# Uploading instead of recording: a 30 second spoken mp3 posted as multipart,
+# converted, transcribed, summarized, played back over a Range request and
+# deleted - plus a .txt that has to come back 415. Takes about a minute.
+backend\.venv\Scripts\python backend\scripts\smoke_upload.py
 ```
 
 Point a smoke run at a scratch database rather than your own library:

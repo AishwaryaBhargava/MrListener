@@ -31,8 +31,18 @@ MEETING_STATUSES = (
     STATUS_FAILED,
 )
 
+# How the audio got here. "live" is a microphone recording streamed over the
+# WebSocket; "upload" is a file the user handed to POST /api/meetings/upload.
+# Everything after the audio.wav exists is identical for both.
+SOURCE_LIVE = "live"
+SOURCE_UPLOAD = "upload"
+MEETING_SOURCES = (SOURCE_LIVE, SOURCE_UPLOAD)
+
 # ``pipeline_stage`` says which step of run_pipeline() is in flight while the
 # status is "processing". It is NULL whenever nothing is running.
+#: Only an upload sees this one: ffmpeg decoding the container the user sent
+#: into audio.wav. A live recording is already converted by /stop.
+STAGE_CONVERTING = "converting"
 STAGE_TRANSCRIBING = "transcribing"
 #: Stage 3. Named for what the user sees, not for the algorithm - the notes are
 #: already on screen by the time this one starts and it is the slow step.
@@ -41,6 +51,7 @@ STAGE_SUMMARIZING = "summarizing"
 #: Kept so a row written by an older build still reads back sensibly.
 STAGE_DIARIZING = "diarizing"
 PIPELINE_STAGES = (
+    STAGE_CONVERTING,
     STAGE_TRANSCRIBING,
     STAGE_SUMMARIZING,
     STAGE_IDENTIFYING_SPEAKERS,
@@ -73,6 +84,12 @@ class Meeting(Base):
     # Which pipeline step is running right now, and why the last one failed.
     pipeline_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
     pipeline_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: "live" | "upload". Rows written before uploads existed read back as
+    #: "live" thanks to the column default the migration adds.
+    source: Mapped[str | None] = mapped_column(String(16), nullable=True, default=SOURCE_LIVE)
+    #: The name of the file the user uploaded, as the browser sent it.
+    source_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # --- Reserved for later stages (all nullable, all JSON encoded as text) ---
     transcript_json: Mapped[str | None] = mapped_column(Text, nullable=True)      # Stage 2

@@ -42,6 +42,9 @@ DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
 # Filenames inside backend/data/audio/<meeting_id>/
 RAW_FILENAME = "raw.webm"
 WAV_FILENAME = "audio.wav"
+#: An uploaded recording is kept beside audio.wav under this stem plus its
+#: original extension, so the file the user handed over is never lost.
+UPLOAD_STEM = "upload"
 
 # Target format for every downstream stage (Whisper + pyannote both want this).
 WAV_SAMPLE_RATE = 16000
@@ -71,6 +74,20 @@ LIVE_WINDOW_FILENAME = "live_window.wav"
 TRANSCRIBE_CHUNK_SECONDS = 600
 # Files at or under this size are sent whole; larger ones are always chunked.
 GROQ_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+# --- Uploaded recordings ----------------------------------------------------
+#: Containers ffmpeg can decode that the upload endpoint accepts. Anything else
+#: is refused with a 415 before a single byte reaches the disk. Video files are
+#: accepted too: only the first audio stream is kept.
+UPLOAD_EXTENSIONS = (
+    "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
+    "webm", "mp4", "mov", "mkv", "wma", "aiff",
+)
+#: Hard ceiling on one upload. Enforced while streaming to disk, so an
+#: oversized file is abandoned partway rather than written out in full.
+UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
+#: How much of the request body is moved per write.
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 # --- Stage 4: notes ---------------------------------------------------------
 NOTES_MODEL = "llama-3.3-70b-versatile"
@@ -151,6 +168,19 @@ def wav_path(meeting_id: str) -> Path:
 
 def live_window_path(meeting_id: str) -> Path:
     return meeting_dir(meeting_id) / LIVE_WINDOW_FILENAME
+
+
+def upload_path(meeting_id: str, extension: str) -> Path:
+    """``backend/data/audio/<id>/upload.<ext>`` - the file as it was sent."""
+    return meeting_dir(meeting_id) / f"{UPLOAD_STEM}.{extension.lstrip('.').lower()}"
+
+
+def stored_upload(meeting_id: str) -> Path | None:
+    """The kept original for this meeting, whatever container it arrived in."""
+    for candidate in sorted(meeting_dir(meeting_id).glob(f"{UPLOAD_STEM}.*")):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def ffmpeg_bin() -> str | None:
