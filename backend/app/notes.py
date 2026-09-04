@@ -219,7 +219,9 @@ def _complete(
                 response = client.chat.completions.create(
                     model=model,
                     temperature=temp,
-                    max_tokens=config.NOTES_MAX_OUTPUT_TOKENS,
+                    max_tokens=config.NOTES_MAX_OUTPUT_TOKENS_BY_MODEL.get(
+                        model, config.NOTES_MAX_OUTPUT_TOKENS
+                    ),
                     response_format={"type": "json_object"},
                     messages=[
                         {"role": "system", "content": system},

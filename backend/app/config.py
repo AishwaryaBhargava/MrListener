@@ -82,6 +82,12 @@ NOTES_MODEL_CANDIDATES = (
 #: minute and reject a request whose expected output would exceed them, so
 #: this has to be explicit and modest.
 NOTES_MAX_OUTPUT_TOKENS = 1500
+#: Per-model overrides for models whose free-tier output cap is lower than
+#: the default; the request is refused outright when max_tokens exceeds it.
+NOTES_MAX_OUTPUT_TOKENS_BY_MODEL = {
+    "qwen/qwen3.8-27b": 900,
+    "qwen/qwen3.6-27b": 900,
+}
 NOTES_TEMPERATURE = 0.2
 NOTES_MAX_ATTEMPTS = 3
 NOTES_BACKOFF_SECONDS = 1.5
