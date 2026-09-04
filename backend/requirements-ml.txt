@@ -1,0 +1,39 @@
+# MrListener - Stage 3 speaker diarization (pyannote.audio on CPU).
+#
+# Kept separate from requirements.txt because this pulls ~1.5 GB of wheels and
+# only the diarization stage needs it.
+#
+#   backend\.venv\Scripts\python -m pip install -r backend/requirements-ml.txt
+#
+# The line below is what makes that one-liner work: torch publishes CPU-only
+# wheels under a local version tag (+cpu) that exists ONLY on the PyTorch
+# index, so without it pip resolves torch from PyPI and drags in the ~2.5 GB
+# CUDA build. When merging these entries into backend/requirements.txt, move
+# this --extra-index-url line to the TOP of that file (pip reads global index
+# options wherever they appear, but keeping them first is what everyone
+# expects) and leave the rest of the pins as they are.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.5.1+cpu
+torchaudio==2.5.1+cpu
+pyannote.audio==3.3.2
+
+# --- pins that are load-bearing, not cosmetic --------------------------------
+# huggingface_hub 1.x removed the `use_auth_token` kwarg that pyannote 3.3.2
+# still passes to hf_hub_download, so an unpinned install fails at
+# Pipeline.from_pretrained with "unexpected keyword argument 'use_auth_token'".
+# Stay on 0.26.x until pyannote.audio 4.x.
+huggingface_hub==0.26.5
+# pyannote's stack (asteroid-filterbanks, pyannote.core) is still numpy 1.x.
+numpy==1.26.4
+# torchaudio 2.5 has no built-in Windows audio backend; soundfile (libsndfile)
+# is what actually decodes the wav. Without it loading audio raises on Windows.
+soundfile==0.12.1
+
+# Transitive but pinned so a future release cannot silently break the pipeline.
+lightning==2.6.5
+pytorch-lightning==2.6.5
+speechbrain==1.1.1
+
+# Verified 2026-09-03 on Windows 11, Python 3.10.2, Intel i7-1165G7 (4c/8t):
+# pyannote/speaker-diarization-3.1 runs at roughly 0.75-1.0x realtime on CPU.

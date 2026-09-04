@@ -1,0 +1,46 @@
+# MrListener backend (Python 3.10 compatible)
+#
+# The --extra-index-url below has to come first: torch publishes its CPU-only
+# wheels under a local version tag (+cpu) that exists ONLY on the PyTorch
+# index. Without this line pip resolves torch from PyPI and drags in the
+# ~2.5 GB CUDA build. pip honours index options wherever they appear, but
+# keeping them at the top is what everyone expects.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+sqlalchemy==2.0.36
+python-dotenv==1.0.1
+python-multipart==0.0.20
+aiofiles==24.1.0
+websockets==13.1
+groq==0.13.1
+
+# --- Speaker diarization (pyannote.audio on CPU) ----------------------------
+# Around 1.5 GB of wheels. Only the diarization step needs them, and the app
+# runs without them (turn "Identify speakers" off on the Settings page), but
+# `npm run setup` installs everything so the default experience is complete.
+# These entries are also kept standalone in requirements-ml.txt.
+torch==2.5.1+cpu
+torchaudio==2.5.1+cpu
+pyannote.audio==3.3.2
+
+# --- pins that are load-bearing, not cosmetic -------------------------------
+# huggingface_hub 1.x removed the `use_auth_token` kwarg that pyannote 3.3.2
+# still passes to hf_hub_download, so an unpinned install fails at
+# Pipeline.from_pretrained with "unexpected keyword argument 'use_auth_token'".
+# Stay on 0.26.x until pyannote.audio 4.x.
+huggingface_hub==0.26.5
+# pyannote's stack (asteroid-filterbanks, pyannote.core) is still numpy 1.x.
+numpy==1.26.4
+# torchaudio 2.5 has no built-in Windows audio backend; soundfile (libsndfile)
+# is what actually decodes the wav. Without it loading audio raises on Windows.
+soundfile==0.12.1
+
+# Transitive but pinned so a future release cannot silently break the pipeline.
+lightning==2.6.5
+pytorch-lightning==2.6.5
+speechbrain==1.1.1
+
+# Verified 2026-09-03 on Windows 11, Python 3.10.2, Intel i7-1165G7 (4c/8t):
+# pyannote/speaker-diarization-3.1 runs at roughly 0.75-1.0x realtime on CPU.

@@ -1,0 +1,20 @@
+{
+  "name": "mrlistener",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Meeting notetaker - record, transcribe, identify speakers, write notes",
+  "scripts": {
+    "setup": "npm run setup:backend && npm run setup:frontend",
+    "setup:backend": "python -m venv backend\\.venv && backend\\.venv\\Scripts\\python -m pip install --upgrade pip && backend\\.venv\\Scripts\\python -m pip install -r backend\\requirements.txt",
+    "setup:frontend": "npm --prefix frontend install",
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "cd backend && .venv\\Scripts\\python -m uvicorn app.main:app --reload --port 8000",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "start \"\" http://localhost:8000 && npm run serve",
+    "serve": "cd backend && .venv\\Scripts\\python -m uvicorn app.main:app --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

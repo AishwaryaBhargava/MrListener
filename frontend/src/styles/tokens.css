@@ -1,0 +1,68 @@
+/* MrListener design tokens - the single source of truth for the visual system. */
+
+:root {
+  /* --- Surfaces --- */
+  --ground: #E6ECEB;
+  --sidebar: #E0E7E6;
+  --card: #F3F7F6;
+
+  /* --- Lines --- */
+  --border: #D5DEDC;
+  --border-strong: #C9D4D2;
+
+  /* --- Subtle fills (hover states, inert tracks, tiles) --- */
+  --fill-subtle: #DCE4E2;
+  --fill-subtle-strong: #D8E1DF;
+
+  /* --- Accent --- */
+  --accent: #2A8C82;
+  --accent-hover: #1F6E67;
+  --accent-tint: #CFE3E0;
+
+  /* --- Type --- */
+  --text: #1E2928;        /* headings */
+  --text-body: #2B3736;   /* body copy */
+  --muted: #5C6B69;       /* secondary text + input placeholders */
+  --meta: #6B7A78;        /* timestamps, meta lines, any text under 14px */
+  --faint: #8A9997;       /* NON-TEXT strokes only: chevrons, checkbox borders */
+
+  /* --- State --- */
+  --recording: #C4533F;
+
+  /* --- Speaker palette ---
+     Five hues at matched lightness/chroma so no speaker reads as louder than
+     another. The dot is the saturated stroke colour, the tint is the chip
+     ground, the text colour is the accessible label on that tint. Slots wrap
+     after five (see frontend/src/lib/speakers.ts). */
+  --speaker-1: #2A8C82;        /* teal - the product accent */
+  --speaker-1-tint: #CFE3E0;
+  --speaker-1-text: #1F6E67;
+  --speaker-2: #B08238;        /* ochre */
+  --speaker-2-tint: #E8DFCB;
+  --speaker-2-text: #7A5A1E;
+  --speaker-3: #6F6DA8;        /* slate violet */
+  --speaker-3-tint: #DDDCEA;
+  --speaker-3-text: #4B4A7A;
+  --speaker-4: #A9756C;        /* muted clay */
+  --speaker-4-tint: #EADCDA;
+  --speaker-4-text: #7A4A44;
+  --speaker-5: #75906A;        /* muted moss */
+  --speaker-5-tint: #DCE6D8;
+  --speaker-5-text: #4C6142;
+
+  /* --- Radii --- */
+  --radius-card: 18px;
+  --radius-button: 12px;
+  --radius-nav: 10px;
+  --radius-pill: 999px;
+
+  /* --- Layout --- */
+  --sidebar-width: 224px;
+  --main-padding: 28px 36px;
+
+  /* --- Type stack --- */
+  --font: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(30, 41, 40, 0.04);
+  --shadow-raised: 0 6px 18px rgba(30, 41, 40, 0.08);
+}

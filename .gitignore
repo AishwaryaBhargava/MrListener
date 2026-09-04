@@ -1,0 +1,29 @@
+# Python
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+frontend/dist/
+
+# Recorded audio + SQLite database
+data/
+backend/data/
+
+# Generated smoke-test fixtures (rebuilt by backend/scripts/make_fixtures.py)
+backend/scripts/fixtures/
+
+# Secrets
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
