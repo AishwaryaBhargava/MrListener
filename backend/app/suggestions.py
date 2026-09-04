@@ -401,42 +401,15 @@ def _compress_prompt(previous: str, older: str) -> str:
 
 
 def _complete(client: Any, system: str, user: str) -> dict:
-    """One JSON-mode chat completion at ``SUGGESTIONS_TEMPERATURE``."""
-    last_error: Exception | None = None
-    model = notes.resolve_model(client)
-    for attempt in range(1, config.NOTES_MAX_ATTEMPTS + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                temperature=config.SUGGESTIONS_TEMPERATURE,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            )
-            payload = json.loads(response.choices[0].message.content or "")
-            if not isinstance(payload, dict):
-                raise ValueError("the model returned JSON that is not an object")
-            return payload
-        except Exception as exc:  # noqa: BLE001 - the SDK raises a wide family
-            last_error = exc
-            if attempt == config.NOTES_MAX_ATTEMPTS:
-                break
-            delay = config.NOTES_BACKOFF_SECONDS * (2 ** (attempt - 1))
-            log.warning(
-                "suggestion attempt %d/%d failed (%s); retrying in %.1fs",
-                attempt,
-                config.NOTES_MAX_ATTEMPTS,
-                type(last_error).__name__,
-                delay,
-            )
-            time.sleep(delay)
-
-    raise SuggestionsError(
-        f"Groq could not write suggestions after {config.NOTES_MAX_ATTEMPTS} attempts: "
-        f"{last_error}"
-    ) from last_error
+    """One JSON-mode completion on the suggestions model list, with the same
+    per-model fallback and cooldown the notes use."""
+    return notes._complete(  # noqa: SLF001 - shared Groq plumbing
+        client,
+        system,
+        user,
+        candidates=config.SUGGESTIONS_MODEL_CANDIDATES,
+        temperature=config.SUGGESTIONS_TEMPERATURE,
+    )
 
 
 # --------------------------------------------------------------------------

@@ -92,6 +92,19 @@ NOTES_CHUNK_CHARS = 40_000
 #: Suggestions reuse the notes model and its fallback list, but run hotter:
 #: they are a brainstorm, not a record, and 0.2 makes them repeat themselves.
 SUGGESTIONS_TEMPERATURE = 0.3
+#: Live suggestions run many times per meeting, so they get their own, cheaper
+#: model list. Groq rate limits are per model, which keeps an hour of live
+#: refreshes from exhausting the daily budget the notes need afterwards.
+SUGGESTIONS_MODEL_CANDIDATES = (
+    "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
+)
+#: How long a model that answered 429 is skipped before being tried again,
+#: when the error message does not say.
+MODEL_COOLDOWN_SECONDS = 15 * 60
 #: Floor for the gap between two automatic refreshes. The settings page can
 #: raise it; nothing can lower it below SUGGESTIONS_INTERVAL_MIN.
 SUGGESTIONS_MIN_INTERVAL = 45
@@ -101,7 +114,7 @@ SUGGESTIONS_MIN_NEW_WORDS = 40
 #: The tail sent verbatim. Everything older is represented by the rolling
 #: context summary instead, which is what keeps the prompt bounded on a long
 #: meeting.
-SUGGESTIONS_VERBATIM_SECONDS = 8 * 60
+SUGGESTIONS_VERBATIM_SECONDS = 5 * 60
 #: Re-compress the older transcript into the rolling summary every N refreshes.
 SUGGESTIONS_SUMMARY_EVERY = 3
 #: Ring-buffer depth held in memory per active meeting.

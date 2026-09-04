@@ -79,6 +79,9 @@ class Context:
     diarized: bool = False
     #: True when only the notes are being regenerated (POST /notes/regenerate).
     notes_only: bool = False
+    #: Set when the first notes pass failed; diarization still runs and the
+    #: second pass retries, so a busy model never blocks speaker identification.
+    notes_error: str | None = None
 
 
 class PipelineError(RuntimeError):
@@ -256,8 +259,21 @@ async def _write_notes(context: Context) -> bool:
 
 
 async def _step_notes(context: Context) -> None:
-    """First notes pass - fast, and what the user sees within ~30 s of /stop."""
-    await _write_notes(context)
+    """First notes pass - fast, and what the user sees within ~30 s of /stop.
+
+    A failure here (typically a rate limit) is recorded but does not stop the
+    run: the transcript is safe, diarization is worth doing anyway, and the
+    second notes pass gets another go.
+    """
+    try:
+        await _write_notes(context)
+        context.notes_error = None
+    except PipelineError as exc:
+        if context.notes_only:
+            raise
+        context.notes_error = str(exc)
+        _update(context.meeting_id, pipeline_error=context.notes_error)
+        log.warning("meeting %s: notes failed, continuing to speakers: %s", context.meeting_id, exc)
 
 
 def _run_diarize(wav_path: str, limit: int | None) -> list[dict]:
@@ -330,10 +346,19 @@ async def _step_diarize(context: Context) -> None:
 
 
 async def _step_notes_with_speakers(context: Context) -> None:
-    """Second notes pass. Cheap, and only worth it once speakers exist."""
-    if not context.diarized:
+    """Second notes pass. Runs once speakers exist, or as a retry when the
+    first pass failed."""
+    if not context.diarized and context.notes_error is None:
         return
-    await _write_notes(context)
+    try:
+        await _write_notes(context)
+        context.notes_error = None
+    except PipelineError as exc:
+        if context.notes_error is None:
+            # The first pass succeeded; keep those notes rather than fail the run.
+            log.warning("meeting %s: speaker-aware notes pass failed, keeping earlier notes: %s", context.meeting_id, exc)
+            return
+        context.notes_error = str(exc)
 
 
 #: (stage label, coroutine). The label is only informational - a step sets its
@@ -385,6 +410,8 @@ async def run_pipeline(
     finally:
         config.live_window_path(meeting_id).unlink(missing_ok=True)
 
+    if error is None and context.notes_error:
+        error = context.notes_error
     _update(meeting_id, status=STATUS_READY, pipeline_stage=None, pipeline_error=error)
     log.info("pipeline for meeting %s finished%s", meeting_id, " with an error" if error else "")
 

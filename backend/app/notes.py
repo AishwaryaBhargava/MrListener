@@ -36,6 +36,7 @@ a few extra seconds.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import threading
 import time
@@ -122,82 +123,124 @@ def _client():
     return Groq(api_key=key)
 
 
-_model: str | None = None
+_available: set[str] | None = None
 _model_lock = threading.Lock()
+#: model name -> unix time until which it is skipped (answered 429 / not found).
+_cooldown: dict[str, float] = {}
+
+
+def _available_models(client: Any) -> set[str] | None:
+    """Model ids this key can call, asked once per process. Empty if unknown."""
+    global _available
+    if _available is not None:
+        return _available
+    with _model_lock:
+        if _available is not None:
+            return _available
+        try:
+            _available = {str(item.id) for item in client.models.list().data}
+        except Exception:  # noqa: BLE001 - listing is an optimization, not a gate
+            log.warning("could not list Groq models; trying candidates blind")
+            _available = set()
+        return _available
+
+
+def candidate_models(client: Any, candidates: tuple[str, ...] | None = None) -> list[str]:
+    """``candidates`` filtered to what this key can see, in order, skipping any
+    model currently in cooldown. Falls back to the raw list when /models is
+    unavailable, and to everything when all are cooling down."""
+    names = candidates or config.NOTES_MODEL_CANDIDATES
+    available = _available_models(client)
+    ordered = [n for n in names if not available or n in available] or list(names)
+    now = time.time()
+    live = [n for n in ordered if _cooldown.get(n, 0.0) <= now]
+    return live or ordered
 
 
 def resolve_model(client: Any) -> str:
-    """The first model in ``NOTES_MODEL_CANDIDATES`` this account can call.
+    """The first usable notes model (kept for callers that want one name)."""
+    return candidate_models(client)[0]
 
-    Groq retires hosted models on its own schedule, and a key that works fine
-    for Whisper may have no access to a given chat model - which surfaces as a
-    404 on the very first notes call, after the user has already waited for a
-    transcript. Asking ``/models`` once per process costs one cheap request and
-    turns that into a silent, sensible fallback. Cached for the life of the
-    process; restart the backend to pick up a newly granted model.
+
+def _retry_after_seconds(exc: Exception) -> float:
+    """Best effort parse of the API hint "Please try again in 47m9.1s"."""
+    text = str(exc)
+    match = re.search(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", text)
+    if not match or not any(match.groups()):
+        return config.MODEL_COOLDOWN_SECONDS
+    hours, minutes, seconds = match.groups()
+    total = float(hours or 0) * 3600 + float(minutes or 0) * 60 + float(seconds or 0)
+    return max(60.0, min(total + 5.0, 24 * 3600))
+
+
+def _should_switch_model(exc: Exception) -> str | None:
+    """Returns a reason when the error is about the model, not this request."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    if status == 429 or "rate_limit" in text or "rate limit" in text:
+        return "rate limited"
+    if status in (404, 400) and ("model" in text or "not found" in text or "decommission" in text):
+        return "not available"
+    return None
+
+
+def _complete(
+    client: Any,
+    system: str,
+    user: str,
+    candidates: tuple[str, ...] | None = None,
+    temperature: float | None = None,
+) -> dict:
+    """One JSON-mode chat completion.
+
+    Transient failures are retried with backoff on the same model. A rate
+    limit or a missing model moves straight on to the next candidate, and the
+    exhausted model is skipped for as long as the API asked (or a default
+    cooldown), so one busy model never blocks notes or suggestions.
     """
-    global _model
-    if _model is not None:
-        return _model
-
-    with _model_lock:
-        if _model is not None:
-            return _model
-        available: set[str] = set()
-        try:
-            available = {str(item.id) for item in client.models.list().data}
-        except Exception:  # noqa: BLE001 - listing is an optimization, not a gate
-            log.warning("could not list Groq models; using %s", config.NOTES_MODEL)
-        chosen = next(
-            (name for name in config.NOTES_MODEL_CANDIDATES if name in available),
-            config.NOTES_MODEL,
-        )
-        if chosen != config.NOTES_MODEL:
-            log.info(
-                "%s is not available on this key; writing notes with %s",
-                config.NOTES_MODEL,
-                chosen,
-            )
-        _model = chosen
-        return _model
-
-
-def _complete(client: Any, system: str, user: str) -> dict:
-    """One JSON-mode chat completion, retried on transient failures."""
     last_error: Exception | None = None
-    model = resolve_model(client)
-    for attempt in range(1, config.NOTES_MAX_ATTEMPTS + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                temperature=config.NOTES_TEMPERATURE,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            )
-            content = response.choices[0].message.content or ""
-            payload = json.loads(content)
-            if not isinstance(payload, dict):
-                raise ValueError("the model returned JSON that is not an object")
-            return payload
-        except Exception as exc:  # noqa: BLE001 - SDK raises a wide family
-            last_error = exc
-            if attempt == config.NOTES_MAX_ATTEMPTS:
-                break
-            delay = config.NOTES_BACKOFF_SECONDS * (2 ** (attempt - 1))
-            log.warning(
-                "notes attempt %d/%d failed (%s); retrying in %.1fs",
-                attempt,
-                config.NOTES_MAX_ATTEMPTS,
-                type(last_error).__name__,
-                delay,
-            )
-            time.sleep(delay)
+    models = candidate_models(client, candidates)
+    temp = config.NOTES_TEMPERATURE if temperature is None else temperature
+    for model in models:
+        for attempt in range(1, config.NOTES_MAX_ATTEMPTS + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    temperature=temp,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                )
+                content = response.choices[0].message.content or ""
+                payload = json.loads(content)
+                if not isinstance(payload, dict):
+                    raise ValueError("the model returned JSON that is not an object")
+                return payload
+            except Exception as exc:  # noqa: BLE001 - SDK raises a wide family
+                last_error = exc
+                reason = _should_switch_model(exc)
+                if reason:
+                    wait = _retry_after_seconds(exc) if reason == "rate limited" else config.MODEL_COOLDOWN_SECONDS
+                    _cooldown[model] = time.time() + wait
+                    log.warning("%s is %s; skipping it for %.0fs and trying the next model", model, reason, wait)
+                    break
+                if attempt == config.NOTES_MAX_ATTEMPTS:
+                    break
+                delay = config.NOTES_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                log.warning(
+                    "%s attempt %d/%d failed (%s); retrying in %.1fs",
+                    model,
+                    attempt,
+                    config.NOTES_MAX_ATTEMPTS,
+                    type(last_error).__name__,
+                    delay,
+                )
+                time.sleep(delay)
 
     raise NotesError(
-        f"Groq could not write the notes after {config.NOTES_MAX_ATTEMPTS} attempts: {last_error}"
+        f"Groq could not write the notes with any available model ({', '.join(models)}): {last_error}"
     ) from last_error
 
 
