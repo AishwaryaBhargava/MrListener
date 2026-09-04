@@ -84,6 +84,12 @@ def markdown(meeting: Meeting) -> str:
         if summary:
             lines += ["## Summary", "", summary, ""]
 
+        takeaways = [str(item).strip() for item in note.get("key_takeaways") or [] if str(item).strip()]
+        if takeaways:
+            lines += ["## Key takeaways", ""]
+            lines += [f"- {item}" for item in takeaways]
+            lines.append("")
+
         topics = note.get("topics") or []
         if topics:
             lines += ["## Topics", ""]
@@ -153,10 +159,7 @@ def markdown(meeting: Meeting) -> str:
                 lines.append(f"- {text} — {' · '.join(meta)}")
             lines.append("")
 
-        for heading, key in (
-            ("Follow-ups for you", "follow_up_questions"),
-            ("Key takeaways", "key_takeaways"),
-        ):
+        for heading, key in (("Follow-ups for you", "follow_up_questions"),):
             items = [str(item).strip() for item in note.get(key) or [] if str(item).strip()]
             if items:
                 lines += [f"## {heading}", ""]

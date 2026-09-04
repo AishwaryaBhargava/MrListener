@@ -63,6 +63,8 @@ export function NotesPanel({
         </Section>
       )}
 
+      <ListSection title="Key takeaways" items={notes.key_takeaways} />
+
       {topics.length > 0 && (
         <Section title="Topics">
           <ul className="topic-list">
@@ -132,7 +134,6 @@ export function NotesPanel({
       )}
 
       <ListSection title="Follow-ups for you" items={notes.follow_up_questions ?? []} />
-      <ListSection title="Key takeaways" items={notes.key_takeaways} />
     </div>
   )
 }
