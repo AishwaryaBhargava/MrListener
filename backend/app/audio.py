@@ -125,6 +125,56 @@ def extract_window(src: Path, dst: Path, start: float) -> Optional[float]:
     return duration
 
 
+def split_for_upload(
+    src: Path, out_dir: Path, chunk_seconds: int, total_seconds: Optional[float] = None
+) -> list[tuple[Path, float]]:
+    """Cut ``src`` into consecutive FLAC chunks for upload-size-limited APIs.
+
+    Returns ``[(chunk_path, start_offset_seconds), ...]`` in order. Chunks are
+    16 kHz mono FLAC, so a 10-minute chunk is well under Groq's 25 MB cap. The
+    caller deletes them when done.
+    """
+    ffmpeg = ffmpeg_bin()
+    if not ffmpeg:
+        raise AudioError("ffmpeg was not found on PATH")
+    if total_seconds is None:
+        total_seconds = wav_duration(src) or probe_duration(src) or 0.0
+    if total_seconds <= 0:
+        raise AudioError(f"could not determine the duration of {src.name}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    chunks: list[tuple[Path, float]] = []
+    index = 0
+    start = 0.0
+    while start < total_seconds:
+        dst = out_dir / f"chunk_{index:03d}.flac"
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-ss", f"{start:.3f}",
+            "-t", str(chunk_seconds),
+            "-i", str(src),
+            "-vn",
+            "-ac", str(WAV_CHANNELS),
+            "-ar", str(WAV_SAMPLE_RATE),
+            "-c:a", "flac",
+            str(dst),
+        ]
+        proc = _run(cmd)
+        if proc.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
+            for path, _ in chunks:
+                path.unlink(missing_ok=True)
+            dst.unlink(missing_ok=True)
+            detail = proc.stderr.decode("utf-8", "replace").strip()[-800:]
+            raise AudioError(f"ffmpeg failed while chunking ({proc.returncode}): {detail}")
+        chunks.append((dst, start))
+        index += 1
+        start += chunk_seconds
+    return chunks
+
+
 def wav_duration(path: Path) -> Optional[float]:
     """Exact duration of a PCM wav, straight from its header - no ffprobe hop."""
     try:

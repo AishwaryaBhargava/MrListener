@@ -53,6 +53,15 @@ GROQ_BACKOFF_SECONDS = 1.5
 # Scratch file the live task reuses for each extracted window.
 LIVE_WINDOW_FILENAME = "live_window.wav"
 
+# Groq rejects uploads over 25 MB (free tier) with HTTP 413. A 16 kHz mono
+# 16-bit WAV is ~1.9 MB per minute, so anything past ~13 minutes must be sent
+# in pieces. The full-file pass therefore splits the recording into FLAC chunks
+# of this many seconds (FLAC keeps the audio lossless at roughly half the size)
+# and stitches the timestamps back together.
+TRANSCRIBE_CHUNK_SECONDS = 600
+# Files at or under this size are sent whole; larger ones are always chunked.
+GROQ_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
 # --- Stage 4: notes ---------------------------------------------------------
 NOTES_MODEL = "llama-3.3-70b-versatile"
 #: Groq retires hosted models fairly often and not every account can see every

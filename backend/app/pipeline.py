@@ -43,8 +43,9 @@ import re
 from dataclasses import dataclass
 
 import anyio
+from pathlib import Path
 
-from . import config, groq_client, live, notes, settings, speakers, transcripts
+from . import audio, config, groq_client, live, notes, settings, speakers, transcripts
 from .db import SessionLocal
 from .models import (
     STAGE_IDENTIFYING_SPEAKERS,
@@ -163,6 +164,36 @@ async def _step_live_tail(context: Context) -> None:
         log.exception("live tail pass failed for meeting %s", context.meeting_id)
 
 
+def _transcribe_whole_file(wav: Path) -> dict:
+    """Blocking. Sends a small file whole; splits a large one into FLAC chunks
+    so no single upload exceeds Groq's size limit, then stitches the segments
+    back together with their original timestamps."""
+    if wav.stat().st_size <= config.GROQ_MAX_UPLOAD_BYTES:
+        return groq_client.transcribe(wav, 0.0, None)
+
+    chunk_dir = wav.parent / "chunks"
+    chunks = audio.split_for_upload(wav, chunk_dir, config.TRANSCRIBE_CHUNK_SECONDS)
+    log.info("%s: %d chunks of %ds for the full pass", wav.parent.name, len(chunks), config.TRANSCRIBE_CHUNK_SECONDS)
+    segments: list[dict] = []
+    language = None
+    try:
+        for path, offset in chunks:
+            part = groq_client.transcribe(path, offset, None)
+            language = language or part.get("language")
+            for seg in part.get("segments") or []:
+                seg = dict(seg)
+                seg["id"] = len(segments)
+                segments.append(seg)
+    finally:
+        for path, _ in chunks:
+            path.unlink(missing_ok=True)
+        try:
+            chunk_dir.rmdir()
+        except OSError:
+            pass
+    return {"segments": segments, "language": language}
+
+
 async def _step_transcribe(context: Context) -> None:
     """One pass over the finished wav.
 
@@ -176,8 +207,8 @@ async def _step_transcribe(context: Context) -> None:
         raise PipelineError("There is no audio.wav to transcribe")
 
     try:
-        result = await anyio.to_thread.run_sync(groq_client.transcribe, wav, 0.0, None)
-    except groq_client.TranscriptionError as exc:
+        result = await anyio.to_thread.run_sync(_transcribe_whole_file, wav)
+    except (groq_client.TranscriptionError, audio.AudioError) as exc:
         raise PipelineError(str(exc)) from exc
 
     segments = result.get("segments") or []
