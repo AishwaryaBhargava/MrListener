@@ -14,7 +14,7 @@ import { MeetingStatusPill } from '../components/StatusPill'
 import { PipelineProgress } from '../components/PipelineProgress'
 import { TranscriptList, WorkingIndicator } from '../components/Transcript'
 import { useToast } from '../components/Toast'
-import { api, type Meeting, type Transcript } from '../lib/api'
+import { api, type Meeting, type Settings, type Transcript } from '../lib/api'
 import { formatDuration, formatLongDate, formatTimeOfDay, stageLabel } from '../lib/format'
 
 /** How often to re-read the meeting while the backend pipeline is running. */
@@ -30,6 +30,7 @@ export default function MeetingDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
+  const [settings, setSettings] = useState<Settings | null>(null)
   const savedTitleRef = useRef('')
   // Mirrors `title` so `load` can compare against it without taking it as a
   // dependency - otherwise the poll interval would restart on every keystroke.
@@ -58,6 +59,19 @@ export default function MeetingDetailPage() {
     },
     [id],
   )
+
+  useEffect(() => {
+    let alive = true
+    api
+      .getSettings()
+      .then((values) => {
+        if (alive) setSettings(values)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -321,6 +335,7 @@ export default function MeetingDetailPage() {
             stage={stage}
             hasSpeakers={meeting.speakers.length > 0}
             durationSeconds={meeting.duration_seconds}
+            diarizationEnabled={settings?.diarization_enabled ?? true}
           />
         )}
       </div>

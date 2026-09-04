@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from . import notes as notes_mod
 from . import speakers as speakers_mod
 from . import transcripts
+from . import settings
 from .models import Meeting
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9 ._-]+")
@@ -59,11 +60,18 @@ def _date(iso: str | None) -> str:
 
 
 def markdown(meeting: Meeting) -> str:
-    names = speakers_mod.name_map(meeting.speaker_names_json)
-    roster = speakers_mod.as_list(meeting.speaker_names_json)
+    show = settings.diarization_enabled()
+    names = speakers_mod.name_map(meeting.speaker_names_json) if show else {}
+    roster = speakers_mod.as_list(meeting.speaker_names_json) if show else []
     payload = transcripts.loads(meeting.transcript_json) or transcripts.empty()
-    segments = speakers_mod.resolve_segments(payload.get("segments") or [], names)
+    segments = (
+        speakers_mod.resolve_segments(payload.get("segments") or [], names)
+        if show
+        else speakers_mod.strip_segments(payload.get("segments") or [])
+    )
     note = notes_mod.resolve(notes_mod.loads(meeting.notes_json), names)
+    if note and not show:
+        note = speakers_mod.strip_notes(note)
 
     lines: list[str] = [f"# {meeting.title}", ""]
 

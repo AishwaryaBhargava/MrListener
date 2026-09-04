@@ -17,6 +17,7 @@ from .. import (
     services,
     speakers,
     transcripts,
+    settings,
 )
 from ..audio import AudioError, range_file_response
 from ..db import get_db
@@ -43,12 +44,15 @@ def _to_out(meeting: Meeting, detail: bool = False, query: str | None = None) ->
     out.transcript_preview = transcripts.preview(meeting.transcript_json)
     out.has_transcript = out.transcript_preview is not None
 
-    names = speakers.name_map(meeting.speaker_names_json)
-    roster = speakers.as_list(meeting.speaker_names_json)
+    show = settings.diarization_enabled()
+    names = speakers.name_map(meeting.speaker_names_json) if show else {}
+    roster = speakers.as_list(meeting.speaker_names_json) if show else []
     out.speaker_count = len(roster)
 
     payload = notes_mod.loads(meeting.notes_json)
     resolved = notes_mod.resolve(payload, names)
+    if resolved and not show:
+        resolved = speakers.strip_notes(resolved)
     out.has_notes = bool(resolved and not resolved.get("empty"))
     out.notes_preview = notes_mod.first_sentence(resolved)
     out.action_item_count = len(resolved.get("action_items") or []) if resolved else 0
@@ -287,9 +291,12 @@ def get_transcript(meeting_id: str, db: Session = Depends(get_db)) -> Transcript
     """
     meeting = _get_or_404(db, meeting_id)
     payload = transcripts.loads(meeting.transcript_json) or transcripts.empty()
-    names = speakers.name_map(meeting.speaker_names_json)
     payload = dict(payload)
-    payload["segments"] = speakers.resolve_segments(payload.get("segments") or [], names)
+    if settings.diarization_enabled():
+        names = speakers.name_map(meeting.speaker_names_json)
+        payload["segments"] = speakers.resolve_segments(payload.get("segments") or [], names)
+    else:
+        payload["segments"] = speakers.strip_segments(payload.get("segments") or [])
     return TranscriptOut.model_validate(payload)
 
 

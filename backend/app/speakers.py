@@ -186,3 +186,33 @@ def coverage(segments: list[dict]) -> float:
 
 def summary_lookup(raw: str | None) -> dict[str, Any]:
     return {str(e.get("speaker_id")): e for e in loads(raw)["summary"]}
+
+
+# --------------------------------------------------------------------------
+# hiding speaker data when identification is switched off
+# --------------------------------------------------------------------------
+
+
+def strip_segments(segments: list[dict]) -> list[dict]:
+    """Transcript segments with every speaker field removed. Stored data is
+    untouched; this only shapes the response while speakers are off."""
+    out = []
+    for segment in segments:
+        cleaned = {k: v for k, v in segment.items() if k not in ("speaker", "speaker_id")}
+        out.append(cleaned)
+    return out
+
+
+def strip_notes(payload: dict) -> dict:
+    """A notes payload with speaker attributions removed: no by_speaker block,
+    no owner or asker labels, with_speakers false. Everything else is kept."""
+    cleaned = dict(payload)
+    cleaned["by_speaker"] = []
+    cleaned["with_speakers"] = False
+    cleaned["action_items"] = [
+        {**item, "owner": None, "owner_speaker_id": None} for item in payload.get("action_items") or []
+    ]
+    cleaned["open_questions"] = [
+        {**item, "asked_by": None, "asked_by_speaker_id": None} for item in payload.get("open_questions") or []
+    ]
+    return cleaned
