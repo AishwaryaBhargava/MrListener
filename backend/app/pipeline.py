@@ -234,6 +234,11 @@ async def _write_notes(context: Context) -> bool:
 
     segment_list = _segments(row)
     names = speakers.name_map(row["speaker_names_json"])
+    if not settings.diarization_enabled():
+        # Speakers are switched off: write the notes as if no labels existed,
+        # so the text never refers to "Speaker 3" the reader cannot see.
+        names = {}
+        segment_list = speakers.strip_segments(segment_list)
 
     try:
         payload = await anyio.to_thread.run_sync(
