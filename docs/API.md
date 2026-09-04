@@ -49,7 +49,7 @@ recording, so the notes model's title suggestion still replaces it.
 
 Accepted extensions, audio or video - anything ffmpeg can decode:
 
-`mp3`, `m4a`, `aac`, `wav`, `flac`, `ogg`, `opus`, `webm`, `mp4`, `mov`, `mkv`, `wma`, `aiff`
+`mp3`, `mpeg`, `mpga`, `mp2`, `m4a`, `m4b`, `aac`, `wav`, `flac`, `ogg`, `oga`, `opus`, `wma`, `aiff`, `amr`, `3gp`, `caf`, `weba`, and the video containers `webm`, `mp4`, `mov`, `mkv`, `mka`, `avi`, `wmv` (only the audio track is used)
 
 | Status | When |
 | ------ | ---- |

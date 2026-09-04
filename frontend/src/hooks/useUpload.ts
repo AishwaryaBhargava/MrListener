@@ -6,26 +6,40 @@ import { api, type Meeting } from '../lib/api'
  *  refused before two gigabytes go over the wire. The backend checks again. */
 export const UPLOAD_EXTENSIONS = [
   'mp3',
+  'mpga',
+  'mp2',
+  'mpeg',
+  'mpg',
   'm4a',
+  'm4b',
   'aac',
   'wav',
   'flac',
   'ogg',
+  'oga',
   'opus',
+  'wma',
+  'aiff',
+  'aif',
+  'amr',
+  '3gp',
+  'caf',
+  'weba',
   'webm',
   'mp4',
   'mov',
   'mkv',
-  'wma',
-  'aiff',
+  'mka',
+  'avi',
+  'wmv',
 ] as const
 
 /** Matches config.UPLOAD_MAX_BYTES. */
 export const UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
-/** What the file picker offers by default. Containers the browser does not
- *  recognise (mkv, wma) are listed by extension so they stay selectable. */
-export const UPLOAD_ACCEPT = `audio/*,video/*,${UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',')}`
+/** What the file picker offers: exactly the supported extensions, so the
+ *  dialog itself hides anything the backend would refuse. */
+export const UPLOAD_ACCEPT = UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',')
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.')

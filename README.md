@@ -159,7 +159,7 @@ as the file is on the backend. The same thing is one click from the library —
 
 Supported formats, audio or video, anything ffmpeg can decode:
 
-`mp3`, `m4a`, `aac`, `wav`, `flac`, `ogg`, `opus`, `webm`, `mp4`, `mov`, `mkv`, `wma`, `aiff`
+`mp3`, `mpeg`, `mpga`, `mp2`, `m4a`, `m4b`, `aac`, `wav`, `flac`, `ogg`, `oga`, `opus`, `wma`, `aiff`, `amr`, `3gp`, `caf`, `weba`, and the video containers `webm`, `mp4`, `mov`, `mkv`, `mka`, `avi`, `wmv` (only the audio track is used)
 
 Only the first audio stream of a video file is used. The ceiling is 2 GB per
 file. The upload is converted to the same 16 kHz mono WAV a live recording

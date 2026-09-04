@@ -12,7 +12,7 @@ import { StatusPill, type PillTone } from '../components/StatusPill'
 import { LiveTranscript } from '../components/Transcript'
 import { useAudioMeter } from '../hooks/useAudioMeter'
 import { useRecorder } from '../hooks/useRecorder'
-import { UPLOAD_ACCEPT, UPLOAD_EXTENSIONS, useUpload } from '../hooks/useUpload'
+import { UPLOAD_ACCEPT, UPLOAD_EXTENSIONS, describeRejection, useUpload } from '../hooks/useUpload'
 import { formatBytes, formatTimer } from '../lib/format'
 
 const BAR_COUNT = 14
@@ -96,6 +96,13 @@ export default function RecordPage() {
   const chooseFile = (file: File | null | undefined) => {
     if (!file) return
     uploader.clearError()
+    const rejection = describeRejection(file)
+    if (rejection) {
+      // Refuse it outright: nothing gets selected, the message says why.
+      setUploadFile(null)
+      uploader.setError(rejection)
+      return
+    }
     setUploadFile(file)
   }
 

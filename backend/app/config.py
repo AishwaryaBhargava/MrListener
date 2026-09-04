@@ -80,8 +80,11 @@ GROQ_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 #: is refused with a 415 before a single byte reaches the disk. Video files are
 #: accepted too: only the first audio stream is kept.
 UPLOAD_EXTENSIONS = (
-    "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
-    "webm", "mp4", "mov", "mkv", "wma", "aiff",
+    # audio
+    "mp3", "mpga", "mp2", "mpeg", "mpg", "m4a", "m4b", "aac", "wav", "flac",
+    "ogg", "oga", "opus", "wma", "aiff", "aif", "amr", "3gp", "caf", "weba",
+    # video containers: only the first audio stream is kept
+    "webm", "mp4", "mov", "mkv", "mka", "avi", "wmv",
 )
 #: Hard ceiling on one upload. Enforced while streaming to disk, so an
 #: oversized file is abandoned partway rather than written out in full.
