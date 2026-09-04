@@ -84,11 +84,11 @@ NOTES_BACKOFF_SECONDS = 1.5
 #: Sized for Groq's free tier, where chat models allow only 6-8k tokens per
 #: minute per request: one request must stay well under that including the
 #: prompt and the answer.
-NOTES_SINGLE_PASS_TOKENS = 4_500
+NOTES_SINGLE_PASS_TOKENS = 3_000
 NOTES_CHARS_PER_TOKEN = 4
 NOTES_SINGLE_PASS_CHARS = NOTES_SINGLE_PASS_TOKENS * NOTES_CHARS_PER_TOKEN
 #: Characters per map chunk (~3.5k tokens of transcript plus the prompt).
-NOTES_CHUNK_CHARS = 14_000
+NOTES_CHUNK_CHARS = 9_000
 #: A 429 whose retry hint is at most this long is a per-minute limit: wait it
 #: out on the same model. Longer hints mean the daily budget is gone: switch.
 MODEL_SHORT_WAIT_SECONDS = 120

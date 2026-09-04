@@ -182,15 +182,21 @@ async def stop_meeting(meeting_id: str, db: Session = Depends(get_db)) -> Meetin
 
 
 @router.post("/{meeting_id}/reprocess", response_model=MeetingOut)
-async def reprocess_meeting(meeting_id: str, db: Session = Depends(get_db)) -> MeetingOut:
+async def reprocess_meeting(
+    meeting_id: str, keep_transcript: bool = False, db: Session = Depends(get_db)
+) -> MeetingOut:
     """Re-run transcription, notes and diarization from the wav.
+
+    With ``keep_transcript=true`` and a transcript already on file, the
+    transcription step is skipped and only notes and speakers are redone.
 
     Async so ``pipeline.schedule`` has the event loop to attach its task to -
     a sync route body runs on the threadpool, where there is none.
     """
     meeting = _require_processable(db, meeting_id)
+    steps = pipeline.RESUME_STEPS if keep_transcript and meeting.transcript_json else None
     pipeline.mark_processing(meeting_id)
-    pipeline.schedule(meeting_id)
+    pipeline.schedule(meeting_id, steps=steps)
     db.refresh(meeting)
     return _to_out(meeting, detail=True)
 

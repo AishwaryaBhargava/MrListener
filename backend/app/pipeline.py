@@ -374,6 +374,15 @@ STEPS: tuple[tuple[str | None, object], ...] = (
 #: POST /notes/regenerate re-runs only this.
 NOTES_STEPS: tuple[tuple[str | None, object], ...] = ((STAGE_SUMMARIZING, _step_notes),)
 
+#: POST /reprocess?keep_transcript=true: everything after transcription. Used
+#: when the transcript on file is fine and only notes/speakers need redoing,
+#: which also spares the daily Whisper quota on long recordings.
+RESUME_STEPS: tuple[tuple[str | None, object], ...] = (
+    (STAGE_SUMMARIZING, _step_notes),
+    (STAGE_IDENTIFYING_SPEAKERS, _step_diarize),
+    (STAGE_SUMMARIZING, _step_notes_with_speakers),
+)
+
 
 # --------------------------------------------------------------------------
 # Runner
