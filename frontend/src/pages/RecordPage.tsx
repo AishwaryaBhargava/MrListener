@@ -157,7 +157,8 @@ export default function RecordPage() {
         </div>
       )}
 
-      <section className="card">
+      <div className={isActive ? 'record-top solo' : 'record-top'}>
+      <section className="card record-main">
         <div className="record-card">
           <div className={isLive ? 'visualizer' : 'visualizer idle'} aria-hidden="true">
             {Array.from({ length: BAR_COUNT }, (_, index) => (
@@ -232,6 +233,7 @@ export default function RecordPage() {
         </div>
       </section>
 
+      {!isActive && (
       <section className="card upload-card">
         <div className="card-head">
           <h2 className="card-title">Upload a recording</h2>
@@ -329,11 +331,10 @@ export default function RecordPage() {
             </button>
           </div>
 
-          {isActive && (
-            <p className="dropzone-note">Uploading is available once this recording has stopped.</p>
-          )}
         </div>
       </section>
+      )}
+      </div>
 
       <section className="card record-transcript">
         <div className="card-head">
