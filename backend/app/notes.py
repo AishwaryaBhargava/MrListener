@@ -219,6 +219,7 @@ def _complete(
                 response = client.chat.completions.create(
                     model=model,
                     temperature=temp,
+                    max_tokens=config.NOTES_MAX_OUTPUT_TOKENS,
                     response_format={"type": "json_object"},
                     messages=[
                         {"role": "system", "content": system},
@@ -235,10 +236,11 @@ def _complete(
             except Exception as exc:  # noqa: BLE001 - SDK raises a wide family
                 last_error = exc
                 if _is_too_large(exc):
-                    raise NotesError(
-                        "One request was larger than the per-minute limit for "
-                        f"{model}; the transcript needs smaller chunks: {exc}"
-                    ) from exc
+                    # This model cannot take a request this size on this
+                    # tier; another candidate may. No cooldown: the model is
+                    # fine for smaller requests.
+                    log.warning("%s rejected the request as too large; trying the next model", model)
+                    break
                 reason = _should_switch_model(exc)
                 if reason == "rate limited":
                     wait = _retry_after_seconds(exc)
@@ -269,6 +271,11 @@ def _complete(
                 )
                 time.sleep(delay)
 
+    if last_error is not None and _is_too_large(last_error):
+        raise NotesError(
+            "Every available model rejected the request as too large for its "
+            f"per-minute limit ({', '.join(models)}); the transcript needs smaller chunks: {last_error}"
+        ) from last_error
     raise NotesError(
         f"Groq could not write the notes with any available model ({', '.join(models)}): {last_error}"
     ) from last_error

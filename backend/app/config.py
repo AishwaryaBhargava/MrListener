@@ -72,10 +72,16 @@ NOTES_MODEL_CANDIDATES = (
     NOTES_MODEL,
     "llama-3.1-70b-versatile",
     "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
     "llama-3.1-8b-instant",
+    # Qwen last: on the free tier it allows only ~1000 output tokens per
+    # minute, which a full set of notes can exceed.
+    "qwen/qwen3.8-27b",
 )
+#: Upper bound on the answer. Free-tier models enforce output-token limits per
+#: minute and reject a request whose expected output would exceed them, so
+#: this has to be explicit and modest.
+NOTES_MAX_OUTPUT_TOKENS = 1500
 NOTES_TEMPERATURE = 0.2
 NOTES_MAX_ATTEMPTS = 3
 NOTES_BACKOFF_SECONDS = 1.5
