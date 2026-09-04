@@ -1539,3 +1539,6 @@ button.transcript-line:hover { background: var(--fill-subtle); }
 @media (max-width: 1100px) {
   .record-top { grid-template-columns: minmax(0, 1fr); }
 }
+/* Let the drop zone absorb the height difference so both cards feel balanced. */
+.record-top .dropzone { flex: 1 1 auto; align-items: center; min-height: 120px; }
+.record-top .upload-foot { margin-top: auto; padding-top: 16px; }
