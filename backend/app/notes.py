@@ -127,6 +127,8 @@ _available: set[str] | None = None
 _model_lock = threading.Lock()
 #: model name -> unix time until which it is skipped (answered 429 / not found).
 _cooldown: dict[str, float] = {}
+#: The model that answered the most recent successful completion.
+_last_model: str | None = None
 
 
 def _available_models(client: Any) -> set[str] | None:
@@ -173,6 +175,13 @@ def _retry_after_seconds(exc: Exception) -> float:
     return max(60.0, min(total + 5.0, 24 * 3600))
 
 
+def _is_too_large(exc: Exception) -> bool:
+    """A single request over the per-minute cap. No retry or model switch
+    helps; the caller has to send less text."""
+    text = str(exc).lower()
+    return "request too large" in text or "reduce your message size" in text
+
+
 def _should_switch_model(exc: Exception) -> str | None:
     """Returns a reason when the error is about the model, not this request."""
     status = getattr(exc, "status_code", None)
@@ -202,7 +211,10 @@ def _complete(
     models = candidate_models(client, candidates)
     temp = config.NOTES_TEMPERATURE if temperature is None else temperature
     for model in models:
-        for attempt in range(1, config.NOTES_MAX_ATTEMPTS + 1):
+        short_waits = 0
+        attempt = 0
+        while attempt < config.NOTES_MAX_ATTEMPTS:
+            attempt += 1
             try:
                 response = client.chat.completions.create(
                     model=model,
@@ -217,14 +229,32 @@ def _complete(
                 payload = json.loads(content)
                 if not isinstance(payload, dict):
                     raise ValueError("the model returned JSON that is not an object")
+                global _last_model
+                _last_model = model
                 return payload
             except Exception as exc:  # noqa: BLE001 - SDK raises a wide family
                 last_error = exc
+                if _is_too_large(exc):
+                    raise NotesError(
+                        "One request was larger than the per-minute limit for "
+                        f"{model}; the transcript needs smaller chunks: {exc}"
+                    ) from exc
                 reason = _should_switch_model(exc)
-                if reason:
-                    wait = _retry_after_seconds(exc) if reason == "rate limited" else config.MODEL_COOLDOWN_SECONDS
+                if reason == "rate limited":
+                    wait = _retry_after_seconds(exc)
+                    if wait <= config.MODEL_SHORT_WAIT_SECONDS and short_waits < config.MODEL_MAX_SHORT_WAITS:
+                        # Per-minute limit: pause and stay on this model.
+                        short_waits += 1
+                        attempt -= 1
+                        log.info("%s per-minute limit; waiting %.0fs", model, wait)
+                        time.sleep(wait)
+                        continue
                     _cooldown[model] = time.time() + wait
-                    log.warning("%s is %s; skipping it for %.0fs and trying the next model", model, reason, wait)
+                    log.warning("%s is rate limited; skipping it for %.0fs and trying the next model", model, wait)
+                    break
+                if reason:
+                    _cooldown[model] = time.time() + config.MODEL_COOLDOWN_SECONDS
+                    log.warning("%s is %s; trying the next model", model, reason)
                     break
                 if attempt == config.NOTES_MAX_ATTEMPTS:
                     break
@@ -478,7 +508,7 @@ def generate(
         {
             "generated_at": _now(),
             "with_speakers": with_speakers,
-            "model": _model or config.NOTES_MODEL,
+            "model": _last_model or config.NOTES_MODEL,
             "empty": False,
         }
     )
